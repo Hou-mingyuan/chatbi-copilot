@@ -1,0 +1,37 @@
+package com.chatbi.copilot.config;
+
+import lombok.Data;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+
+/**
+ * LLM connection settings. Any OpenAI-compatible chat-completions endpoint is supported,
+ * so you can switch between DeepSeek / OpenAI / Qwen(DashScope compatible mode) / Ollama
+ * purely through configuration.
+ */
+@Data
+@ConfigurationProperties(prefix = "chatbi.llm")
+public class LlmProperties {
+
+    /** Informational label only, e.g. deepseek / openai / qwen / ollama. */
+    private String provider = "deepseek";
+
+    /** Base URL of the OpenAI-compatible API, e.g. https://api.deepseek.com/v1 */
+    private String baseUrl = "https://api.deepseek.com/v1";
+
+    /** API key. Injected from env var LLM_API_KEY; may be blank for local Ollama. */
+    private String apiKey = "";
+
+    /** Model name, e.g. deepseek-chat / gpt-4o-mini / qwen-plus / llama3.1 */
+    private String model = "deepseek-chat";
+
+    /** Low temperature keeps SQL generation deterministic. */
+    private Double temperature = 0.0;
+
+    private Integer maxTokens = 2048;
+
+    private Integer timeoutSeconds = 60;
+
+    public boolean isConfigured() {
+        return baseUrl != null && !baseUrl.isBlank() && model != null && !model.isBlank();
+    }
+}

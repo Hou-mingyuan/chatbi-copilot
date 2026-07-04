@@ -1,0 +1,12 @@
+spring:
+  datasource:
+    url: jdbc:h2:file:/app/data/chatbi;AUTO_SERVER=TRUE;MODE=MySQL;DB_CLOSE_ON_EXIT=FALSE
+
+chatbi:
+  demo-datasource:
+    enabled: ${DEMO_DATASOURCE_ENABLED:true}
+    host: ${DEMO_DB_HOST:mysql}
+    port: ${DEMO_DB_PORT:3306}
+    database-name: ${DEMO_DB_NAME:chatbi_demo}
+    username: ${DEMO_DB_USER:chatbi}
+    password: ${DEMO_DB_PASSWORD:chatbi123}

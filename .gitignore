@@ -1,0 +1,31 @@
+# ---- Backend (Java / Maven) ----
+backend/target/
+!backend/.mvn/wrapper/maven-wrapper.jar
+*.class
+
+# H2 embedded metadata store
+backend/data/
+data/
+
+# ---- Frontend (Node / Vite) ----
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---- Secrets / env ----
+.env
+*.local
+
+# ---- IDE / OS ----
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# ---- Logs ----
+*.log
+logs/
