@@ -1,6 +1,8 @@
 -- ChatBI Copilot demo seed data (MySQL).
 -- unit_price / amount / total_amount are back-filled from products & items so everything stays consistent.
 
+SET NAMES utf8mb4;
+
 USE chatbi_demo;
 
 INSERT INTO customers (id, name, region, city, level, created_at) VALUES

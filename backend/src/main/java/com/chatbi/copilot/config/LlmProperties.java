@@ -32,6 +32,17 @@ public class LlmProperties {
     private Integer timeoutSeconds = 60;
 
     public boolean isConfigured() {
-        return baseUrl != null && !baseUrl.isBlank() && model != null && !model.isBlank();
+        if (baseUrl == null || baseUrl.isBlank() || model == null || model.isBlank()) {
+            return false;
+        }
+        if (apiKey != null && !apiKey.isBlank()) {
+            return true;
+        }
+        String normalizedProvider = provider == null ? "" : provider.trim().toLowerCase();
+        String normalizedBaseUrl = baseUrl.trim().toLowerCase();
+        return "ollama".equals(normalizedProvider)
+                || normalizedBaseUrl.contains("localhost")
+                || normalizedBaseUrl.contains("127.0.0.1")
+                || normalizedBaseUrl.contains("host.docker.internal");
     }
 }

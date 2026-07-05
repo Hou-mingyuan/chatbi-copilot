@@ -86,7 +86,8 @@ public class DynamicConnectionManager {
                 String base = "jdbc:mysql://" + c.getHost() + ":" + c.getPort() + "/" + c.getDatabaseName();
                 // useInformationSchema + remarks make DatabaseMetaData return table/column comments
                 String def = "useSSL=false&serverTimezone=UTC&useInformationSchema=true&remarks=true"
-                        + "&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&allowPublicKeyRetrieval=true";
+                        + "&useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull"
+                        + "&allowPublicKeyRetrieval=true";
                 return base + "?" + def + (hasParams ? "&" + params : "");
             }
             case "postgresql", "postgres" -> {

@@ -1,6 +1,8 @@
 -- ChatBI Copilot demo schema (MySQL) - a small retail/sales model.
 -- Table and column COMMENTs are intentionally rich: the app reads them to build LLM prompts.
 
+SET NAMES utf8mb4;
+
 CREATE DATABASE IF NOT EXISTS chatbi_demo DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
 USE chatbi_demo;
 

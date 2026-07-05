@@ -23,10 +23,18 @@ export default defineConfig({
     chunkSizeWarningLimit: 1500,
     rollupOptions: {
       output: {
-        manualChunks: {
-          echarts: ['echarts'],
-          elementplus: ['element-plus', '@element-plus/icons-vue'],
-          vue: ['vue', 'vue-router', 'pinia']
+        manualChunks(id) {
+          const normalized = id.replaceAll('\\', '/')
+          if (normalized.includes('/node_modules/echarts/')) return 'echarts'
+          if (
+            normalized.includes('/node_modules/element-plus/') ||
+            normalized.includes('/node_modules/@element-plus/icons-vue/')
+          ) return 'elementplus'
+          if (
+            normalized.includes('/node_modules/vue/') ||
+            normalized.includes('/node_modules/vue-router/') ||
+            normalized.includes('/node_modules/pinia/')
+          ) return 'vue'
         }
       }
     }

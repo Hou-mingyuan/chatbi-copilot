@@ -7,7 +7,7 @@
   <img alt="Java" src="https://img.shields.io/badge/Java-21-orange" />
   <img alt="Spring Boot" src="https://img.shields.io/badge/Spring%20Boot-3.3-brightgreen" />
   <img alt="Vue" src="https://img.shields.io/badge/Vue-3.5-42b883" />
-  <img alt="Vite" src="https://img.shields.io/badge/Vite-5-646cff" />
+  <img alt="Vite" src="https://img.shields.io/badge/Vite-8-646cff" />
   <img alt="License" src="https://img.shields.io/badge/License-MIT-blue" />
 </p>
 
@@ -69,7 +69,7 @@ flowchart LR
 | 层 | 技术 |
 | --- | --- |
 | 后端 | Java 21、Spring Boot 3.3、MyBatis-Plus、JSqlParser、Apache POI、springdoc-openapi |
-| 前端 | Vue 3、Vite 5、Element Plus、ECharts 5、Pinia、Vue Router、Axios |
+| 前端 | Vue 3、Vite 8、Element Plus、ECharts 6、Pinia、Vue Router、Axios |
 | 存储 | H2（应用元数据，内嵌零配置）、MySQL/PostgreSQL（目标业务库） |
 | LLM | 任意 OpenAI 兼容接口（DeepSeek / OpenAI / 通义 / Ollama） |
 | 部署 | Docker、docker-compose、Nginx |
@@ -88,7 +88,18 @@ docker compose up -d --build
 
 # 3. 打开浏览器
 #    前端:      http://localhost:8888
+#    健康检查:  http://localhost:8080/api/health
 #    API 文档:  http://localhost:8080/api/swagger-ui.html
+#    示例 MySQL（可选，用客户端连库）: localhost:13306（容器内仍为 3306）
+```
+
+如本机端口已被其他项目占用，可在 `.env` 中覆盖：
+
+```bash
+FRONTEND_HOST_PORT=18888
+BACKEND_HOST_PORT=18084
+MYSQL_HOST_PORT=13316
+docker compose up -d --build
 ```
 
 启动后 MySQL 会自动导入 `sample-data/mysql` 的建表与种子数据，后端会自动注册一个指向该示例库的
@@ -111,7 +122,7 @@ mvn -s settings.xml spring-boot:run
 #   $env:LLM_API_KEY="sk-xxx"; mvn -s settings.xml spring-boot:run
 ```
 
-**前端**（需要 Node 18+）：
+**前端**（需要 Node.js 20.19+ 或 22.12+）：
 
 ```bash
 cd frontend
@@ -192,6 +203,7 @@ chatbi-copilot/
 | GET/POST/DELETE | `/api/favorites` | 收藏 |
 | POST | `/api/export/excel` | 结果导出 Excel |
 | GET | `/api/llm/status` | LLM 配置状态 |
+| GET | `/api/health` | 健康检查（Docker smoke） |
 
 ## 🧪 测试
 
