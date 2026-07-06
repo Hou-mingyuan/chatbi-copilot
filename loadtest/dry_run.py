@@ -48,7 +48,7 @@ def pct(values: list[float], p: float) -> float:
     if not values:
         return 0.0
     s = sorted(values)
-    return s[int(round((p / 100) * (len(s) - 1))]
+    return s[int(round((p / 100) * (len(s) - 1)))]
 
 
 def main() -> int:

@@ -4,6 +4,7 @@
 > Text2SQL 智能分析平台，前后端完整、可一键运行、可安全落地。
 
 <p>
+  <img alt="CI" src="https://github.com/Hou-mingyuan/chatbi-copilot/actions/workflows/ci.yml/badge.svg">
   <img alt="Java" src="https://img.shields.io/badge/Java-21-orange" />
   <img alt="Spring Boot" src="https://img.shields.io/badge/Spring%20Boot-3.3-brightgreen" />
   <img alt="Vue" src="https://img.shields.io/badge/Vue-3.5-42b883" />
