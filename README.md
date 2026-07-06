@@ -103,7 +103,21 @@ docker compose up -d --build
 ```
 
 启动后 MySQL 会自动导入 `sample-data/mysql` 的建表与种子数据，后端会自动注册一个指向该示例库的
-数据源，打开前端即可直接问数。试试：
+数据源，打开前端即可直接问数。
+
+### 演示账号（Docker 默认）
+
+| 项 | 值 |
+| --- | --- |
+| 主机 | `localhost:13306` |
+| 数据库 | `chatbi_demo` |
+| 用户 / 密码 | `chatbi` / `chatbi123` |
+| 应用内数据源 | **Demo - Sales (MySQL)**（通常 `datasourceId=1`） |
+
+> 演示口令见 `.env.example`；**生产务必关闭** `DEMO_DATASOURCE_ENABLED` 并修改 `CHATBI_SECRET`。  
+> 部署与安全详见 [DEPLOYMENT.md](DEPLOYMENT.md)、[SECURITY.md](SECURITY.md)；压测基线见 [docs/PERFORMANCE.md](docs/PERFORMANCE.md)。
+
+试试：
 
 - `各产品类目的销售额占比`
 - `2024年每月销售额趋势`
@@ -132,6 +146,27 @@ npm run dev
 ```
 
 示例库可用 Docker 单独起：`docker compose up -d mysql`，或手动执行 `sample-data/` 下的 SQL。
+
+## 🎬 演示指南
+
+**5 分钟作品集演示路线**（Docker 已启动、`.env` 已填 `LLM_API_KEY`）：
+
+1. 打开 http://localhost:8888 ，确认顶部数据源为 **Demo - Sales (MySQL)**。
+2. 在问数框输入：`各产品类目的销售额占比` → 查看自动生成的 SQL、表格与推荐图表。
+3. 追问：`只看华东大区` → 验证多轮上下文。
+4. 打开 **语义层**，查看/编辑字段业务别名；打开 **历史** 与 **收藏** 体验重跑与收藏。
+5. 结果页点击 **导出 Excel**。
+
+**无 LLM Key 时的 smoke**（CI / 本地验收）：
+
+```bash
+curl -f http://localhost:8080/api/health
+curl -X POST http://localhost:8080/api/query/run \
+  -H "Content-Type: application/json" \
+  -d "{\"datasourceId\":1,\"sql\":\"select p.category, count(*) as cnt from products p group by p.category limit 10\"}"
+```
+
+完整 Docker 流程见 [docs/USAGE.md](docs/USAGE.md)；生产部署见 [DEPLOYMENT.md](DEPLOYMENT.md)；安全基线见 [SECURITY.md](SECURITY.md)；压测见 [docs/PERFORMANCE.md](docs/PERFORMANCE.md)。
 
 ## ⚙️ 配置说明
 
@@ -182,7 +217,10 @@ chatbi-copilot/
 │   ├── nginx.conf
 │   └── Dockerfile
 ├── sample-data/             # MySQL / PostgreSQL 建表 + 种子数据
-├── docs/                    # 架构文档
+├── loadtest/                # k6 / dry_run（health + query/run）
+├── docs/                    # USAGE、architecture、PERFORMANCE
+├── DEPLOYMENT.md            # 生产部署指南
+├── SECURITY.md              # 安全策略
 ├── docker-compose.yml       # 一键启动
 └── .env.example
 ```
@@ -214,6 +252,8 @@ mvn -s settings.xml test
 
 覆盖 SQL 安全护栏（放行/拦截/LIMIT 注入/CTE/多语句/危险函数）与提示词组装（Schema 渲染/多轮）。
 
+HTTP smoke / 轻量压测（不调用 LLM）见 [docs/PERFORMANCE.md](docs/PERFORMANCE.md)。
+
 ## 🗺️ Roadmap
 
 - [ ] 基于表结构 + 术语的向量 RAG，进一步提升复杂问题准确率
@@ -222,6 +262,14 @@ mvn -s settings.xml test
 - [ ] 更多数据库方言（ClickHouse / Doris / SQLite）
 - [ ] 用户与权限、行列级数据权限
 - [ ] 流式输出（SSE）与生成过程展示
+
+## 📚 文档索引
+
+- [使用指南（Docker 问数流程）](docs/USAGE.md)
+- [架构说明](docs/architecture.md)
+- [部署指南](DEPLOYMENT.md)
+- [安全策略](SECURITY.md)
+- [性能与压测](PERFORMANCE_REPORT.md)
 
 ## 📄 License
 
