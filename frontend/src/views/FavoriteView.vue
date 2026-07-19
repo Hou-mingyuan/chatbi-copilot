@@ -1,10 +1,11 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, defineAsyncComponent } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '@/api'
 import { useAppStore } from '@/stores/app'
-import ResultPanel from '@/components/ResultPanel.vue'
+
+const ResultPanel = defineAsyncComponent(() => import('@/components/ResultPanel.vue'))
 
 const store = useAppStore()
 const { currentDatasourceId } = storeToRefs(store)

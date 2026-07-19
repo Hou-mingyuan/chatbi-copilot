@@ -1,11 +1,14 @@
 <script setup>
-import { ref, nextTick, computed } from 'vue'
+import { ref, nextTick, computed, defineAsyncComponent } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { api } from '@/api'
 import { useAppStore } from '@/stores/app'
-import ResultPanel from '@/components/ResultPanel.vue'
+import { MOCK_DEMO_STEPS, sleep } from '@/utils/demoFlow'
+import { buildDrilldownQuestion } from '@/utils/askStream'
+import { typewriterText, ASK_LOADING_PHASES } from '@/utils/typewriter'
+const ResultPanel = defineAsyncComponent(() => import('@/components/ResultPanel.vue'))
 
 defineOptions({ name: 'ChatView' })
 
@@ -17,7 +20,12 @@ const question = ref('')
 const messages = ref([])
 const turns = ref([])
 const sending = ref(false)
+const demoRunning = ref(false)
+const demoStep = ref(0)
 const listRef = ref(null)
+
+const isMockMode = computed(() => llm.value?.provider === 'mock')
+const busy = computed(() => sending.value || demoRunning.value)
 
 const examples = [
   '各产品类目的销售额占比',
@@ -37,19 +45,33 @@ function scrollBottom() {
   })
 }
 
-async function send(text) {
+function loadingPhaseText(phase) {
+  return ASK_LOADING_PHASES[Math.min(phase ?? 0, ASK_LOADING_PHASES.length - 1)]
+}
+
+async function send(text, { isRetry = false } = {}) {
   const q = (typeof text === 'string' ? text : question.value).trim()
   if (!q) return
   if (noDatasource.value) {
     ElMessage.warning('请先在右上角选择数据源')
     return
   }
-  messages.value.push({ role: 'user', content: q })
-  messages.value.push({ role: 'assistant', loading: true })
+  if (!isRetry) {
+    messages.value.push({ role: 'user', content: q })
+    messages.value.push({ role: 'assistant', loading: true, loadingPhase: 0 })
+  } else {
+    messages.value.push({ role: 'assistant', loading: true, loadingPhase: 0 })
+  }
   const am = messages.value[messages.value.length - 1]
   question.value = ''
   sending.value = true
   scrollBottom()
+
+  const phaseTimer = setInterval(() => {
+    if (am.loading && am.loadingPhase < ASK_LOADING_PHASES.length - 1) {
+      am.loadingPhase += 1
+    }
+  }, 900)
 
   try {
     const res = await api.ask({
@@ -57,26 +79,81 @@ async function send(text) {
       question: q,
       history: turns.value.slice(-5)
     })
+    clearInterval(phaseTimer)
     am.loading = false
+
     if (res.needClarification) {
       am.clarification = res.clarification
       am.explanation = res.explanation
     } else {
-      am.result = res
+      am.streaming = true
+      am.streamText = ''
+      const explanation = res.explanation || '分析完成，正在加载图表与数据…'
+      await typewriterText(explanation, (t) => {
+        am.streamText = t
+      }, { charDelayMs: 14, chunkSize: 2 })
+      am.streaming = false
+      am.result = { ...res, question: q }
       turns.value.push({ question: q, sql: res.sql })
     }
   } catch (e) {
+    clearInterval(phaseTimer)
     am.loading = false
     am.error = e?.message || '查询失败'
+    am.retryQuestion = q
   } finally {
     sending.value = false
     scrollBottom()
   }
 }
 
+function retryFrom(am) {
+  const q = am.retryQuestion
+  if (!q || busy.value) return
+  const idx = messages.value.indexOf(am)
+  if (idx >= 0) messages.value.splice(idx, 1)
+  send(q, { isRetry: true })
+}
+
+function onDrilldown(payload) {
+  const q = buildDrilldownQuestion(payload.label || payload.value, {
+    dimension: payload.dimension,
+    question: payload.question,
+  })
+  send(q)
+}
+
 function clearChat() {
+  if (demoRunning.value) return
   messages.value = []
   turns.value = []
+}
+
+async function runMockDemo() {
+  if (noDatasource.value) {
+    ElMessage.warning('请先在右上角选择数据源')
+    return
+  }
+  if (busy.value) return
+
+  demoRunning.value = true
+  demoStep.value = 0
+  messages.value = []
+  turns.value = []
+
+  try {
+    for (let i = 0; i < MOCK_DEMO_STEPS.length; i++) {
+      demoStep.value = i + 1
+      await send(MOCK_DEMO_STEPS[i].question)
+      if (i < MOCK_DEMO_STEPS.length - 1) {
+        await sleep(600)
+      }
+    }
+    ElMessage.success('Mock 演示完成：类目占比 → 月度趋势 → Top5 → 华东追问')
+  } finally {
+    demoRunning.value = false
+    demoStep.value = 0
+  }
 }
 </script>
 
@@ -91,7 +168,16 @@ function clearChat() {
     </div>
 
     <el-alert
-      v-if="!llm.configured"
+      v-if="isMockMode"
+      type="success"
+      show-icon
+      :closable="false"
+      title="Mock 零密钥演示模式"
+      description="无需 API Key。点击「一键演示」自动跑通 4 步 NL2SQL 流程，或点击下方示例问题。"
+      style="margin-bottom: 12px"
+    />
+    <el-alert
+      v-else-if="!llm.configured"
       type="warning"
       show-icon
       :closable="false"
@@ -109,7 +195,19 @@ function clearChat() {
           <el-link type="primary" @click="router.push('/datasources')">去添加一个</el-link>
           （或用 docker-compose 一键启动演示库）
         </p>
-        <p v-else class="hint">试试下面的示例问题：</p>
+        <p v-else class="hint">试试下面的示例问题，或使用 Mock 一键演示：</p>
+        <div v-if="!noDatasource && isMockMode" class="demo-actions">
+          <el-button
+            type="primary"
+            size="large"
+            round
+            :loading="demoRunning"
+            :icon="'VideoPlay'"
+            @click="runMockDemo"
+          >
+            {{ demoRunning ? `演示中 ${demoStep}/${MOCK_DEMO_STEPS.length}` : '一键演示 Mock 问数' }}
+          </el-button>
+        </div>
         <div v-if="!noDatasource" class="examples">
           <el-tag
             v-for="ex in examples"
@@ -135,15 +233,22 @@ function clearChat() {
           <div class="bubble bot-bubble">
             <div v-if="m.loading" class="loading">
               <el-icon class="is-loading"><Loading /></el-icon>
-              正在思考并生成 SQL…
+              {{ loadingPhaseText(m.loadingPhase) }}
             </div>
-            <el-alert
-              v-else-if="m.error"
-              type="error"
-              :closable="false"
-              show-icon
-              :title="m.error"
-            />
+            <div v-else-if="m.streaming" class="stream-text">
+              {{ m.streamText }}<span class="type-cursor">▍</span>
+            </div>
+            <div v-else-if="m.error" class="error-block">
+              <el-alert
+                type="error"
+                :closable="false"
+                show-icon
+                :title="m.error"
+              />
+              <el-button size="small" type="primary" plain class="retry-btn" @click="retryFrom(m)">
+                重试
+              </el-button>
+            </div>
             <el-alert
               v-else-if="m.clarification"
               type="warning"
@@ -152,7 +257,15 @@ function clearChat() {
               title="需要澄清"
               :description="m.clarification"
             />
-            <ResultPanel v-else-if="m.result" :result="m.result" />
+            <Suspense v-else-if="m.result">
+              <ResultPanel :result="m.result" @drilldown="onDrilldown" />
+              <template #fallback>
+                <div class="loading">
+                  <el-icon class="is-loading"><Loading /></el-icon>
+                  加载结果面板…
+                </div>
+              </template>
+            </Suspense>
           </div>
         </div>
       </template>
@@ -165,13 +278,13 @@ function clearChat() {
         :autosize="{ minRows: 1, maxRows: 4 }"
         resize="none"
         placeholder="例如：各产品类目的销售额占比（Enter 发送，Shift+Enter 换行）"
-        :disabled="noDatasource"
+        :disabled="noDatasource || demoRunning"
         @keydown.enter.exact.prevent="send()"
       />
       <el-button
         type="primary"
         :loading="sending"
-        :disabled="noDatasource || !question.trim()"
+        :disabled="noDatasource || !question.trim() || demoRunning"
         :icon="'Promotion'"
         @click="send()"
       >
@@ -215,6 +328,9 @@ function clearChat() {
 }
 .hint {
   font-size: 13px;
+}
+.demo-actions {
+  margin: 16px 0 4px;
 }
 .examples {
   display: flex;
@@ -275,6 +391,27 @@ function clearChat() {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.stream-text {
+  color: #374151;
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.type-cursor {
+  color: var(--brand-1);
+  animation: blink 1s step-end infinite;
+}
+@keyframes blink {
+  50% { opacity: 0; }
+}
+.error-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.retry-btn {
+  align-self: flex-start;
 }
 .composer {
   display: flex;

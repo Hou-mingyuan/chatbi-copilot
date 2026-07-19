@@ -37,6 +37,19 @@ ChatBI 允许 LLM 生成 SQL 并执行，纵深防御如下：
 | 公网 | 必须前置 **VPN / SSO / API Gateway 鉴权**；当前版本无应用层 RBAC |
 | MySQL 示例容器 | 默认映射 `13306`；生产勿将 Demo 容器与真实数据混用 |
 
+## 应用层认证与限流 Roadmap（首期 · P2）
+
+> **现状**：MVP 无内置登录；安全依赖 SqlGuard + 网络隔离。以下为首期可落地路径，与 README Roadmap「用户与权限」对齐。
+
+| 阶段 | 能力 | 实现要点 | 验收 |
+| --- | --- | --- | --- |
+| **Phase 1a** | API Key 网关 | Nginx / Spring `OncePerRequestFilter` 校验 `X-API-Key`；Key 仅环境变量注入 | 未带 Key 返回 401；smoke 脚本带 Key 通过 |
+| **Phase 1b** | 按 IP 限流 | Bucket4j 或网关 `limit_req`；默认 60 req/min/Key | k6 超限返回 429，正常流量 P95 不变 |
+| **Phase 2** | 用户会话 + 数据源 ACL | Spring Security + H2 用户表；数据源按 `ownerId` 过滤 | 用户 A 不可见用户 B 的数据源配置 |
+| **Phase 3** | 行列级权限 | 语义层绑定角色；SqlGuard 追加 `WHERE tenant_id = ?` | 集成测试覆盖越权拒绝 |
+
+**首期推荐（作品集 → 内网试点）**：先落地 **Phase 1a + 1b**（约 1–2 人日），公网演示一律经反向代理终止 TLS 并启用 Key；业务库账号保持只读。
+
 ## 依赖与供应链
 
 - 后端：Maven 依赖定期 `mvn versions:display-dependency-updates` 审查。

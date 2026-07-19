@@ -25,9 +25,9 @@ services:
     container_name: chatbi-backend
     environment:
       SPRING_PROFILES_ACTIVE: docker
-      LLM_PROVIDER: ${LLM_PROVIDER:-deepseek}
-      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.deepseek.com/v1}
-      LLM_MODEL: ${LLM_MODEL:-deepseek-chat}
+      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_MODEL: ${LLM_MODEL:-mock}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.0}
       CHATBI_SECRET: ${CHATBI_SECRET:-chatbi-copilot-dev-secret-change-me}

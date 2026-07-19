@@ -58,6 +58,7 @@ docker run --rm ^
 | LLM 超时 | `LLM_TIMEOUT_SECONDS`（默认 60s） |
 | 前端代理 | Nginx `proxy_read_timeout 300s` |
 | 元数据存储 | 内嵌 H2 文件库，零外部依赖启动 |
+| 前端 bundle | 路由 + `ResultPanel`/`ChartRenderer`/`echarts` 懒加载；`manualChunks` 拆分 vue/element-plus/echarts；`npm run build:analyze` → `dist/stats.html` |
 
 ## 建议压测步骤
 
@@ -65,6 +66,27 @@ docker run --rm ^
 2. 运行 k6 smoke（10 VUs → 50 VUs 递增）。
 3. 观察 `docker compose logs backend` 是否有连接池耗尽或 SQL 超时。
 4. 若 P95 超标，优先检查：宿主机 CPU/内存、MySQL 健康、同机其他服务争用端口。
+
+## k6 50 VU 复测（2026-07-06 · Hub Profile 18182）
+
+| 项 | Round-5 | Round-6 (project-hub-1) |
+| --- | --- | --- |
+| 状态 | **✅ 通过** | **✅ 通过** |
+| 环境 | Hub `:18182` | Hub `:18182` |
+| VU × 时长 | 50 × 1m | 50 × 30s |
+| **实测 P95** | **121.39 ms** ✓ | **79.7 ms** ✓ |
+| **实测 RPS** | **120.5 req/s** | **134.4 req/s** |
+| **错误率** | **0.00%** ✓ | **0.00%** ✓ |
+| 迭代 | 2448 · 7344 req | 1380 · 4140 req |
+
+```powershell
+# Hub Mock 栈运行后
+docker run --rm `
+  -e BASE_URL=http://host.docker.internal:18182 `
+  -e VUS=50 -e DURATION=1m -e THINK_TIME_SECONDS=1 `
+  -v D:/project-hub/chatbi-copilot/performance:/scripts `
+  grafana/k6:latest run /scripts/k6-smoke.js
+```
 
 ## 相关文档
 

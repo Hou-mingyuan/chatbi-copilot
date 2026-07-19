@@ -33,6 +33,7 @@ public class LlmController {
         status.put("model", props.getModel());
         status.put("baseUrl", props.getBaseUrl());
         status.put("hasApiKey", props.getApiKey() != null && !props.getApiKey().isBlank());
+        status.put("mockMode", "mock".equalsIgnoreCase(String.valueOf(props.getProvider()).trim()));
         status.put("configured", client.isConfigured());
         return ApiResponse.ok(status);
     }

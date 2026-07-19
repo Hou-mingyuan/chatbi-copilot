@@ -32,6 +32,9 @@ public class LlmProperties {
     private Integer timeoutSeconds = 60;
 
     public boolean isConfigured() {
+        if (provider != null && "mock".equalsIgnoreCase(provider.trim())) {
+            return true;
+        }
         if (baseUrl == null || baseUrl.isBlank() || model == null || model.isBlank()) {
             return false;
         }

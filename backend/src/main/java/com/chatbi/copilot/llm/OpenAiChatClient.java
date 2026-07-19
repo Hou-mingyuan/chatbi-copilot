@@ -9,7 +9,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
-import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
@@ -22,7 +21,6 @@ import java.util.List;
  * base/relative-path pitfalls, so any provider with a {@code /chat/completions} route works.
  */
 @Slf4j
-@Component
 public class OpenAiChatClient implements LlmClient {
 
     private final LlmProperties props;

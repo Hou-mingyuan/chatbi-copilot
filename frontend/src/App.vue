@@ -53,9 +53,13 @@ onMounted(async () => {
           </template>
         </el-select>
 
-        <el-tooltip :content="llm.configured ? `模型: ${llm.model}` : '未配置 LLM，请设置环境变量'">
-          <el-tag :type="llm.configured ? 'success' : 'danger'" effect="dark" round>
-            {{ llm.configured ? `LLM: ${llm.provider}` : 'LLM 未配置' }}
+        <el-tooltip :content="llm.configured ? `模型: ${llm.model || llm.provider}` : '未配置 LLM，请设置环境变量'">
+          <el-tag
+            :type="llm.provider === 'mock' ? 'warning' : llm.configured ? 'success' : 'danger'"
+            effect="dark"
+            round
+          >
+            {{ llm.provider === 'mock' ? 'Mock 演示' : llm.configured ? `LLM: ${llm.provider}` : 'LLM 未配置' }}
           </el-tag>
         </el-tooltip>
 

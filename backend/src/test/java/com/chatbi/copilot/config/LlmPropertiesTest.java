@@ -38,4 +38,15 @@ class LlmPropertiesTest {
 
         assertThat(props.isConfigured()).isTrue();
     }
+
+    @Test
+    void mockProviderWorksWithoutApiKey() {
+        LlmProperties props = new LlmProperties();
+        props.setProvider("mock");
+        props.setBaseUrl("");
+        props.setModel("mock");
+        props.setApiKey("");
+
+        assertThat(props.isConfigured()).isTrue();
+    }
 }

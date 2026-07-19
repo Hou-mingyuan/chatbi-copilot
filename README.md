@@ -29,7 +29,7 @@ API Key 通过环境变量注入，绝不入库、不进代码。
 - **只读安全护栏（核心）**：JSqlParser 解析 + 正则兜底，**仅允许单条 SELECT**，拦截 DML/DDL、多语句、
   `OUTFILE`/`sleep`/`load_file` 等危险构造，自动注入 `LIMIT`，连接池强制只读——多重纵深防御。
 - **自动可视化**：根据结果集的维度/度量/时间列智能推荐图表类型，前端可一键切换柱/折线/饼/表格。
-- **可插拔 LLM**：任意 OpenAI 兼容供应商，配置即用；内置「LLM 未配置」友好提示。
+- **可插拔 LLM**：任意 OpenAI 兼容供应商，配置即用；内置 **Mock 零密钥** 演示模式（`LLM_PROVIDER=mock`）。
 - **多数据源**：同时管理多个 MySQL / PostgreSQL，界面查看库表结构。
 - **语义层**：为表/字段配置业务别名与口径（如 `status=paid` 表示已支付），让模型「听得懂业务黑话」。
 - **完整工程化**：统一响应/异常、参数校验、Swagger API 文档、单元测试、Docker 一键部署、密码 AES 加密。
@@ -63,7 +63,36 @@ flowchart LR
   BE --> META[("H2 元数据库")]
 ```
 
-更详细的组件图、请求时序图与安全护栏流程见 [docs/architecture.md](docs/architecture.md)。
+### 问数全链路时序（NL → SQL → 图表）
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant U as 用户
+  participant F as 前端 Vue
+  participant B as 后端 Spring Boot
+  participant L as LLM（OpenAI 兼容）
+  participant D as 目标业务库
+
+  U->>F: 输入自然语言问题
+  F->>B: POST /api/query/ask
+  B->>B: Schema + 语义层 → Prompt
+  B->>L: chat/completions
+  L-->>B: { sql, explanation, needClarification? }
+  alt 需要澄清
+    B-->>F: 澄清问题（不执行 SQL）
+  else 正常路径
+    B->>B: SqlGuard 只读校验 + LIMIT
+    B->>D: 执行 SELECT
+    D-->>B: 结果集
+    B->>B: ChartRecommender + 历史入库
+    B-->>F: SQL + rows + chart 配置
+    F->>U: 表格 / ECharts 渲染
+  end
+```
+
+> Mock 零密钥模式（`LLM_PROVIDER=mock`）走同一 API 契约，规则映射常见演示问句，适合 CI smoke 与无 Key 环境。完整组件图见 [docs/architecture.md](docs/architecture.md)。
+
 
 ## 🧰 技术栈
 
@@ -80,9 +109,9 @@ flowchart LR
 ### 方式一：Docker Compose 一键启动（推荐）
 
 ```bash
-# 1. 准备环境变量（主要填 LLM_API_KEY）
+# 1. 准备环境变量（Mock 零密钥可直接 cp .env.example .env）
 cp .env.example .env
-#   编辑 .env，把 LLM_API_KEY 换成你的真实 Key
+#   接入真实模型时再编辑 LLM_PROVIDER / LLM_API_KEY
 
 # 2. 一键启动：MySQL 示例库 + 后端 + 前端
 docker compose up -d --build
@@ -144,13 +173,52 @@ cd frontend
 npm install --registry=https://registry.npmmirror.com
 npm run dev
 # 打开 http://localhost:5173 （已配置代理到后端 8080）
+# Mock 模式下问数页提供「一键演示」按钮，自动跑 4 步 NL2SQL 流程
+# 前端 bundle 分析：npm run build:analyze → 打开 dist/stats.html
 ```
 
 示例库可用 Docker 单独起：`docker compose up -d mysql`，或手动执行 `sample-data/` 下的 SQL。
 
 ## 🎬 演示指南
 
-**5 分钟作品集演示路线**（Docker 已启动、`.env` 已填 `LLM_API_KEY`）：
+### 零密钥 Mock 演示（推荐 · 无需 LLM_API_KEY）
+
+**一键脚本（推荐）：**
+
+```powershell
+.\scripts\demo-mock.ps1
+```
+
+```bash
+./scripts/demo-mock.sh
+```
+
+脚本会复制 `.env.example`、启动 Compose、并运行 `node scripts/smoke-mock-demo.mjs` 自动化验收。
+
+手动启动：
+
+```bash
+cp .env.example .env    # 默认 LLM_PROVIDER=mock
+docker compose up -d --build
+node scripts/smoke-mock-demo.mjs http://localhost:8080
+```
+
+| 步骤 | 操作 | 预期 |
+| --- | --- | --- |
+| ✓ | `curl -f http://localhost:8080/api/llm/status` | `"provider":"mock"`, `"configured":true` |
+| ✓ | 打开 http://localhost:8888 ，问：`各产品类目的销售额占比` | 返回 SQL + 表格 + 推荐图表 |
+| ✓ | 追问：`只看华东大区` | Mock 生成带 `region='华东'` 的 SQL |
+| ✓ | `POST /api/query/run` smoke | 不调用 LLM，见下方命令 |
+
+Mock 问数 curl 验收：
+
+```bash
+curl -sf -X POST http://localhost:8080/api/query/ask \
+  -H "Content-Type: application/json" \
+  -d '{"datasourceId":1,"question":"各产品类目的销售额占比"}'
+```
+
+**5 分钟作品集演示路线**（真实 LLM，`.env` 中 `LLM_PROVIDER=deepseek` 并填 `LLM_API_KEY`）：
 
 1. 打开 http://localhost:8888 ，确认顶部数据源为 **Demo - Sales (MySQL)**。
 2. 在问数框输入：`各产品类目的销售额占比` → 查看自动生成的 SQL、表格与推荐图表。
@@ -169,13 +237,28 @@ curl -X POST http://localhost:8080/api/query/run \
 
 完整 Docker 流程见 [docs/USAGE.md](docs/USAGE.md)；生产部署见 [DEPLOYMENT.md](DEPLOYMENT.md)；安全基线见 [SECURITY.md](SECURITY.md)；压测见 [docs/PERFORMANCE.md](docs/PERFORMANCE.md)。
 
+Project Hub 一键启动（端口 **18182** / **18183**）：
+
+```powershell
+cd ai-portfolio/docker
+docker compose -f docker-compose.profiles.yml --profile chatbi-copilot up -d --build
+node ../../chatbi-copilot/scripts/smoke-mock-demo.mjs http://localhost:18182
+```
+
+**ChatBI + RAG 联动 Mock 演示（作品集推荐）**：
+
+```powershell
+cd ai-portfolio/docker
+.\demo-chatbi-rag-mock.ps1
+```
+
 ## ⚙️ 配置说明
 
 后端配置见 `backend/src/main/resources/application.yml`，均可用环境变量覆盖：
 
 | 环境变量 | 说明 | 默认 |
 | --- | --- | --- |
-| `LLM_PROVIDER` | 供应商标识（仅展示用） | `deepseek` |
+| `LLM_PROVIDER` | 供应商标识（`mock` = 零密钥演示） | `mock` |
 | `LLM_BASE_URL` | OpenAI 兼容 base url | `https://api.deepseek.com/v1` |
 | `LLM_MODEL` | 模型名 | `deepseek-chat` |
 | `LLM_API_KEY` | API Key（Ollama 可留空） | 空 |
@@ -254,6 +337,19 @@ mvn -s settings.xml test
 覆盖 SQL 安全护栏（放行/拦截/LIMIT 注入/CTE/多语句/危险函数）与提示词组装（Schema 渲染/多轮）。
 
 HTTP smoke / 轻量压测（不调用 LLM）见 [docs/PERFORMANCE.md](docs/PERFORMANCE.md)。
+
+## 💬 面试 3 问 3 答
+
+**Q1：让 LLM 直接生成 SQL 连生产库，最大的风险是什么？你怎么防？**
+A：风险是 DML/DDL、多语句注入、全表扫与敏感数据泄露。本项目用 **JSqlParser AST 白名单**（仅单条 SELECT/WITH）+ 关键字兜底，自动注入 `LIMIT`，连接池 **read-only + maxRows + queryTimeout** 纵深防御。解析成功优先信任 AST，避免把合法列名误杀。
+
+**Q2：Text2SQL 准确率怎么提，不靠「换更大模型」？**
+A：三层上下文：**Schema + 字段注释**自动注入 Prompt；**语义层**配置业务别名与口径（如 `status=paid`）；多轮对话保留追问上下文。Mock 模式用规则映射常见演示问句，CI 可零密钥回归 NL2SQL 链路。
+
+**Q3：Mock 零密钥演示和真实 LLM 演示，面试/作品集怎么选？**
+A：Mock（`LLM_PROVIDER=mock`）适合 **Docker 一键、CI smoke、无 Key 环境**：完整走通「问句 → SQL 护栏 → 执行 → 图表」，不消耗配额。真实 LLM 演示展示模型泛化与多轮追问；两者共用同一套 API 与前端，切换 `.env` 即可。与 **RAG Study Helper** 联动时，可跑 Hub 脚本 `ai-portfolio/docker/demo-chatbi-rag-mock.ps1`，5 分钟内展示「结构化问数 + 非结构化文档学习」两条 LLM 应用线。
+
+---
 
 ## 🗺️ Roadmap
 

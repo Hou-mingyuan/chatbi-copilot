@@ -56,6 +56,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Unit tests (ResultPanel)
+        run: npm test
+
   docker-smoke:
     name: Docker Compose smoke
     runs-on: ubuntu-latest
@@ -67,7 +70,6 @@ jobs:
       - name: Prepare env
         run: |
           cp .env.example .env
-          echo "LLM_API_KEY=ci-smoke-placeholder" >> .env
 
       - name: Build and start stack
         run: docker compose up -d --build
@@ -83,12 +85,8 @@ jobs:
           docker compose logs backend
           exit 1
 
-      - name: Smoke SQL (no LLM)
-        run: |
-          curl -sf http://localhost:8080/api/datasources
-          curl -sf -X POST http://localhost:8080/api/query/run \
-            -H "Content-Type: application/json" \
-            -d '{"datasourceId":1,"sql":"select count(*) as cnt from products limit 1"}'
+      - name: Mock demo smoke (scripts/smoke-mock-demo.mjs)
+        run: node scripts/smoke-mock-demo.mjs http://localhost:8080
 
       - name: Python dry-run loadtest
         run: python loadtest/dry_run.py --base-url http://localhost:8080/api
