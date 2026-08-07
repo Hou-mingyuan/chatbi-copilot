@@ -1,0 +1,94 @@
+{
+  "datasetVersion": "1.0.0",
+  "startedAt": "2026-07-19T20:01:11.696Z",
+  "finishedAt": "2026-07-19T20:01:27.443Z",
+  "provider": "volcengine",
+  "model": "glm-5.2",
+  "scoring": "executed-result-equivalence",
+  "thresholds": {
+    "modelSuccessRate": 0.9,
+    "clarificationRate": 1,
+    "safetyInterceptionRate": 1
+  },
+  "gates": {
+    "modelSuccessRate": true,
+    "clarificationRate": true,
+    "safetyInterceptionRate": true
+  },
+  "summary": {
+    "total": 2,
+    "passed": 2,
+    "model": {
+      "total": 2,
+      "passed": 2,
+      "successRate": 1
+    },
+    "policy": {
+      "total": 0,
+      "passed": 0
+    },
+    "clarification": {
+      "total": 0,
+      "passed": 0,
+      "rate": 1
+    },
+    "safetyInterception": {
+      "total": 0,
+      "passed": 0,
+      "rate": 1
+    },
+    "failureClassification": {}
+  },
+  "results": [
+    {
+      "id": "online-paid-average-order-value",
+      "layer": "model",
+      "category": "single-table-filter-aggregate",
+      "dialect": "mysql",
+      "datasourceId": 1,
+      "question": "2024年线上渠道已支付订单的平均客单价是多少？",
+      "passed": true,
+      "status": "SUCCEEDED",
+      "generatedSql": "SELECT AVG(total_amount) AS 平均客单价, COUNT(*) AS 订单数, SUM(total_amount) AS 总销售额 FROM orders WHERE order_date BETWEEN '2024-01-01' AND '2024-12-31' AND channel = '线上' AND status = 'paid' LIMIT 5000",
+      "queryId": 436,
+      "expectedRows": [
+        "n:10739.692308000"
+      ],
+      "actualRows": [
+        "n:10739.692308000|n:13.000000000000|n:139616.00000000"
+      ],
+      "resultHashEvidence": {
+        "generatedQueryId": 436,
+        "generatedRowCount": 1,
+        "referenceQueryId": 437,
+        "referenceRowCount": 1
+      },
+      "elapsedMs": 7957
+    },
+    {
+      "id": "online-paid-average-order-value",
+      "layer": "model",
+      "category": "single-table-filter-aggregate",
+      "dialect": "postgresql",
+      "datasourceId": 2,
+      "question": "2024年线上渠道已支付订单的平均客单价是多少？",
+      "passed": true,
+      "status": "SUCCEEDED",
+      "generatedSql": "SELECT AVG(o.total_amount) AS avg_customer_price FROM orders o WHERE o.status = 'paid' AND o.channel = '线上' AND o.order_date >= DATE '2024-01-01' AND o.order_date < DATE '2025-01-01' LIMIT 5000",
+      "queryId": 438,
+      "expectedRows": [
+        "n:10739.692307692"
+      ],
+      "actualRows": [
+        "n:10739.692307692"
+      ],
+      "resultHashEvidence": {
+        "generatedQueryId": 438,
+        "generatedRowCount": 1,
+        "referenceQueryId": 439,
+        "referenceRowCount": 1
+      },
+      "elapsedMs": 7781
+    }
+  ]
+}

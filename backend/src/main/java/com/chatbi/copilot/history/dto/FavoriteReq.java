@@ -7,14 +7,9 @@ import lombok.Data;
 @Data
 public class FavoriteReq {
 
-    @NotNull(message = "datasourceId is required")
-    private Long datasourceId;
-
     @NotBlank(message = "title is required")
     private String title;
 
-    @NotBlank(message = "question is required")
-    private String question;
-
-    private String sql;
+    @NotNull(message = "queryId is required")
+    private Long queryId;
 }

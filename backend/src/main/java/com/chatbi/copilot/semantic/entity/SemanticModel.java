@@ -24,6 +24,8 @@ public class SemanticModel {
 
     private Long datasourceId;
 
+    private String definitionType;
+
     private String tableName;
 
     /** null / blank => table-level entry. */
@@ -32,6 +34,20 @@ public class SemanticModel {
     private String businessAlias;
 
     private String description;
+
+    private String metricExpression;
+    private String aggregation;
+    private String unit;
+    private String timeGrain;
+    private String enumValue;
+    private String enumLabel;
+    private String relatedTable;
+    private String relatedColumn;
+    private String joinType;
+    private Integer version;
+    private Integer active;
+    private Long createdBy;
+    private Long updatedBy;
 
     @TableLogic
     private Integer deleted;

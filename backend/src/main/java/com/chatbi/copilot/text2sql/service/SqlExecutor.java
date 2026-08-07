@@ -5,6 +5,7 @@ import com.chatbi.copilot.datasource.entity.DataSourceConfig;
 import com.chatbi.copilot.datasource.service.DynamicConnectionManager;
 import com.chatbi.copilot.text2sql.dto.ColumnMeta;
 import com.chatbi.copilot.text2sql.dto.QueryExecResult;
+import com.chatbi.copilot.config.SqlGuardProperties;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -14,6 +15,9 @@ import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.SQLTimeoutException;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -26,15 +30,25 @@ import java.util.Map;
 @Component
 public class SqlExecutor {
 
-    private static final int QUERY_TIMEOUT_SECONDS = 30;
+    private static final long MAX_SAFE_JSON_INTEGER = 9_007_199_254_740_991L;
 
     private final DynamicConnectionManager connectionManager;
+    private final QueryCancellationRegistry cancellationRegistry;
+    private final SqlGuardProperties properties;
 
-    public SqlExecutor(DynamicConnectionManager connectionManager) {
+    public SqlExecutor(DynamicConnectionManager connectionManager,
+                       QueryCancellationRegistry cancellationRegistry,
+                       SqlGuardProperties properties) {
         this.connectionManager = connectionManager;
+        this.cancellationRegistry = cancellationRegistry;
+        this.properties = properties;
     }
 
     public QueryExecResult execute(DataSourceConfig config, String sql, int maxRows) {
+        return execute(config, sql, maxRows, null);
+    }
+
+    public QueryExecResult execute(DataSourceConfig config, String sql, int maxRows, String executionId) {
         DataSource ds = connectionManager.getPool(config);
         QueryExecResult result = new QueryExecResult();
         long start = System.currentTimeMillis();
@@ -42,8 +56,9 @@ public class SqlExecutor {
         try (Connection conn = ds.getConnection()) {
             conn.setReadOnly(true);
             try (Statement st = conn.createStatement()) {
-                st.setMaxRows(maxRows);
-                st.setQueryTimeout(QUERY_TIMEOUT_SECONDS);
+                st.setMaxRows(maxRows + 1);
+                st.setQueryTimeout(properties.getQueryTimeoutSeconds());
+                cancellationRegistry.register(executionId, st);
                 try (ResultSet rs = st.executeQuery(sql)) {
                     ResultSetMetaData md = rs.getMetaData();
                     int colCount = md.getColumnCount();
@@ -61,21 +76,32 @@ public class SqlExecutor {
                     result.setColumns(columns);
 
                     List<Map<String, Object>> rows = new ArrayList<>();
-                    while (rs.next()) {
+                    while (rs.next() && rows.size() <= maxRows) {
                         Map<String, Object> row = new LinkedHashMap<>();
                         for (int i = 1; i <= colCount; i++) {
                             row.put(names.get(i - 1), normalize(rs.getObject(i)));
                         }
                         rows.add(row);
                     }
+                    boolean truncated = rows.size() > maxRows;
+                    if (truncated) {
+                        rows.remove(rows.size() - 1);
+                    }
                     result.setRows(rows);
                     result.setRowCount(rows.size());
-                    result.setTruncated(rows.size() >= maxRows);
+                    result.setTruncated(truncated);
+                } finally {
+                    cancellationRegistry.unregister(executionId, st);
                 }
             }
+        } catch (SQLTimeoutException e) {
+            log.warn("SQL execution timed out state={} code={}", e.getSQLState(), e.getErrorCode());
+            throw new BusinessException(org.springframework.http.HttpStatus.GATEWAY_TIMEOUT,
+                    "Query exceeded the execution timeout");
         } catch (SQLException e) {
-            log.warn("SQL execution failed: {}", e.getMessage());
-            throw new BusinessException("SQL execution failed: " + e.getMessage());
+            log.warn("SQL execution failed state={} code={} message={}",
+                    e.getSQLState(), e.getErrorCode(), e.getMessage());
+            throw new BusinessException("Query could not be executed. Check columns, filters, and permissions.");
         }
 
         result.setElapsedMs(System.currentTimeMillis() - start);
@@ -108,6 +134,15 @@ public class SqlExecutor {
         }
         if (v instanceof byte[]) {
             return "[binary]";
+        }
+        if (v instanceof BigDecimal decimal && decimal.precision() > 15) {
+            return decimal.toPlainString();
+        }
+        if (v instanceof BigInteger integer && integer.abs().toString().length() > 15) {
+            return integer.toString();
+        }
+        if (v instanceof Long number && (number > MAX_SAFE_JSON_INTEGER || number < -MAX_SAFE_JSON_INTEGER)) {
+            return number.toString();
         }
         return v;
     }

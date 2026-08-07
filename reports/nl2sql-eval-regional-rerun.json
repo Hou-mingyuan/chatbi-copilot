@@ -1,0 +1,110 @@
+{
+  "datasetVersion": "1.0.0",
+  "startedAt": "2026-07-20T01:47:40.461Z",
+  "finishedAt": "2026-07-20T01:47:50.904Z",
+  "provider": "volcengine",
+  "model": "glm-5.2",
+  "scoring": "executed-result-equivalence",
+  "thresholds": {
+    "modelSuccessRate": 0.9,
+    "clarificationRate": 1,
+    "safetyInterceptionRate": 1
+  },
+  "gates": {
+    "modelSuccessRate": true,
+    "clarificationRate": true,
+    "safetyInterceptionRate": true
+  },
+  "summary": {
+    "total": 2,
+    "passed": 2,
+    "model": {
+      "total": 2,
+      "passed": 2,
+      "successRate": 1
+    },
+    "policy": {
+      "total": 0,
+      "passed": 0
+    },
+    "clarification": {
+      "total": 0,
+      "passed": 0,
+      "rate": 1
+    },
+    "safetyInterception": {
+      "total": 0,
+      "passed": 0,
+      "rate": 1
+    },
+    "failureClassification": {}
+  },
+  "results": [
+    {
+      "id": "regional-paid-order-count",
+      "layer": "model",
+      "category": "multi-turn-base",
+      "dialect": "mysql",
+      "datasourceId": 1,
+      "question": "2024年各大区的已支付订单数是多少？",
+      "passed": true,
+      "status": "SUCCEEDED",
+      "generatedSql": "SELECT c.region AS 大区, COUNT(o.id) AS 已支付订单数 FROM orders o INNER JOIN customers c ON o.customer_id = c.id WHERE o.status = 'paid' AND YEAR(o.order_date) = 2024 GROUP BY c.region ORDER BY 已支付订单数 DESC LIMIT 5000",
+      "queryId": 683,
+      "expectedRows": [
+        "n:2.0000000000000|s:华中",
+        "n:2.0000000000000|s:西南",
+        "n:3.0000000000000|s:华北",
+        "n:6.0000000000000|s:华南",
+        "n:7.0000000000000|s:华东"
+      ],
+      "actualRows": [
+        "n:2.0000000000000|s:华中",
+        "n:2.0000000000000|s:西南",
+        "n:3.0000000000000|s:华北",
+        "n:6.0000000000000|s:华南",
+        "n:7.0000000000000|s:华东"
+      ],
+      "resultHashEvidence": {
+        "generatedQueryId": 683,
+        "generatedRowCount": 5,
+        "referenceQueryId": 684,
+        "referenceRowCount": 5
+      },
+      "elapsedMs": 5630
+    },
+    {
+      "id": "regional-paid-order-count",
+      "layer": "model",
+      "category": "multi-turn-base",
+      "dialect": "postgresql",
+      "datasourceId": 2,
+      "question": "2024年各大区的已支付订单数是多少？",
+      "passed": true,
+      "status": "SUCCEEDED",
+      "generatedSql": "SELECT c.region AS 大区, COUNT(o.id) AS 已支付订单数 FROM orders o INNER JOIN customers c ON o.customer_id = c.id WHERE o.status = 'paid' AND o.order_date >= DATE '2024-01-01' AND o.order_date < DATE '2025-01-01' GROUP BY c.region ORDER BY 已支付订单数 DESC LIMIT 500",
+      "queryId": 685,
+      "expectedRows": [
+        "n:2.0000000000000|s:华中",
+        "n:2.0000000000000|s:西南",
+        "n:3.0000000000000|s:华北",
+        "n:6.0000000000000|s:华南",
+        "n:7.0000000000000|s:华东"
+      ],
+      "actualRows": [
+        "n:2.0000000000000|s:华中",
+        "n:2.0000000000000|s:西南",
+        "n:3.0000000000000|s:华北",
+        "n:6.0000000000000|s:华南",
+        "n:7.0000000000000|s:华东"
+      ],
+      "resultHashEvidence": {
+        "generatedQueryId": 685,
+        "generatedRowCount": 5,
+        "referenceQueryId": 686,
+        "referenceRowCount": 5
+      },
+      "elapsedMs": 4806
+    }
+  ]
+}

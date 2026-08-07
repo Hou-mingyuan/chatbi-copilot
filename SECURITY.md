@@ -1,77 +1,124 @@
-# ChatBI Copilot · 安全说明
+# ChatBI Copilot 安全说明
 
-本文档说明密钥管理、SQL 护栏与生产部署时的安全基线。**应用当前无内置用户登录**；生产环境应通过网络层与网关控制访问。
+## 安全边界
+
+ChatBI 会执行模型生成或用户重跑的 SQL，因此安全性不依赖单一关键字过滤，而由身份、数据权限、AST 校验、执行计划和数据库只读账号共同保证。
+
+当前版本强制数据源、表、敏感列、导出和语义管理权限；不实现行级权限重写。
+
+## 登录与会话
+
+- 密码使用 BCrypt（cost 12）存储。
+- 登录成功后签发高熵随机会话；数据库只保存令牌哈希。
+- 会话 Cookie 为 HttpOnly、SameSite=Strict；生产要求 Secure。
+- 非安全 HTTP 方法必须同时携带 CSRF Cookie 与请求头。
+- 登录失败按客户端和用户名限速；注销会立即撤销服务端会话。
+- 所有非公开接口默认要求认证；管理接口还要求 ADMIN。
+- `/api/health/live` 和 `/api/health/ready` 仅返回最小探针信息，不暴露配置或数据。
+
+## 数据权限
+
+`DataAccessPolicy` 是统一授权入口：
+
+1. 数据源列表只返回当前用户有 QUERY 权限的记录。
+2. Schema 与送入模型的上下文按表和敏感列裁剪。
+3. 模型 SQL和手写 SQL 都从 AST 提取真实表、列和通配符，再做授权。
+4. `SELECT *` 若可能暴露未授权敏感列，会被拒绝。
+5. 历史、会话、收藏和查询任务按用户归属隔离。
+6. Excel 导出只接受本人成功查询的 `queryId`，并重新检查当前 EXPORT 权限。
+
+演示策略把 `customers.name` 标记为敏感列：ANALYST 可访问，VIEWER 不可访问。服务端直接提交该列的 SQL 会返回 HTTP 403。
+
+## SQL 与数据库纵深防御
+
+### AST 护栏
+
+- 只接受 JSqlParser 成功解析的单条 `SELECT` / `WITH ... SELECT`。
+- 解析失败默认拒绝，不存在字符串兜底放行。
+- 拒绝 DML、DDL、多语句、`SELECT INTO`、文件读写、锁和危险函数。
+- 检查 CTE、子查询、别名、显式列与投影通配符。
+- 自动补充或收敛 LIMIT，并限制 OFFSET。
+
+### 执行计划与资源预算
+
+- MySQL 与 PostgreSQL 使用独立 EXPLAIN adapter。
+- 超过确认阈值的扫描先返回 `NEEDS_CONFIRMATION`；超过硬预算直接阻断。
+- JDBC Statement 同时设置查询超时、最大行数和取消钩子。
+- 异步任务有每用户并发上限、队列上限和 90 秒总超时。
+
+### 数据库账号
+
+- MySQL 只接受 USAGE、SELECT、SHOW VIEW 授权；未知或可写 grant 默认拒绝。
+- PostgreSQL 检查 superuser、createdb、数据库 CREATE、可写表和可写 schema。
+- 连接池强制只读；保存或重新核验未通过的数据源不能用于查询。
+- 演示库写入探针在 MySQL 和 PostgreSQL 均由数据库自身拒绝。
+
+## 结果完整性
+
+- 查询成功后保存规范化列、行和 SHA-256。
+- 恢复历史或导出前重新计算并核对哈希，篡改即拒绝。
+- 表格、图表、确定性解读和 Excel 全部读取同一快照。
+- 超过 JavaScript 安全整数精度的数值以字符串保存，并回退无损表格。
+- Excel 对超 15 位整数采用文本单元格；以 `= + - @` 开头的文本会中和，防止公式注入。
 
 ## 密钥与敏感配置
 
-| 项 | 存储方式 | 要求 |
-| --- | --- | --- |
-| `LLM_API_KEY` | 环境变量 / `.env`（勿提交 Git） | 生产使用独立 Key，定期轮换 |
-| `CHATBI_SECRET` | 环境变量 | **生产必须修改**默认值；用于 AES 加密数据源密码 |
-| 业务库密码 | H2 元库中加密存储 | 界面录入后加密；备份 H2 卷时视同敏感数据 |
-| Demo MySQL 账号 | `.env` / compose | **仅用于本地演示**；生产禁用 `DEMO_DATASOURCE_ENABLED` |
-
-### 禁止事项
-
-- 不要将 `.env`、真实 API Key、生产数据库密码提交到仓库。
-- 不要在公网直接暴露未鉴权的 ChatBI 实例（见「网络与访问控制」）。
-- 不要对生产业务库使用 root 等高权限账号；推荐只读账号 + 最小库表授权。
-
-## SQL 执行安全（核心）
-
-ChatBI 允许 LLM 生成 SQL 并执行，纵深防御如下：
-
-1. **SqlGuard（JSqlParser + 正则兜底）**：仅允许单条 `SELECT` / `WITH ... SELECT`；拒绝 DML/DDL、多语句、`INTO OUTFILE`、`load_file`、`sleep`、`benchmark` 等。
-2. **强制 LIMIT**：无 `LIMIT` 自动注入；超过 `max-limit`（默认 5000）收敛。
-3. **连接池只读**：目标数据源 JDBC `readOnly=true`，并设置 `maxRows` 与 `queryTimeout`。
-4. **人工复核**：高风险环境建议「生成 SQL → 人工确认 → 执行」流程（Roadmap 可扩展审批流）。
-
-实现与单测：`backend/.../text2sql/service/SqlGuard.java`。
-
-## 网络与访问控制
-
-| 场景 | 建议 |
+| 配置 | 要求 |
 | --- | --- |
-| 本地 / 内网演示 | Docker Compose + 防火墙限制端口 |
-| 生产 | 前端 Nginx 仅反代静态资源；后端不对外直连业务库端口 |
-| 公网 | 必须前置 **VPN / SSO / API Gateway 鉴权**；当前版本无应用层 RBAC |
-| MySQL 示例容器 | 默认映射 `13306`；生产勿将 Demo 容器与真实数据混用 |
+| `LLM_API_KEY` | 仅环境变量或未跟踪的 `.env`；不得写入日志、源码或报告 |
+| `CHATBI_SECRET` | 用于 AES-GCM 加密数据源密码；生产必须使用随机值并安全备份 |
+| 数据库口令 | 目标库使用独立最小权限只读账号 |
+| 演示口令 | 只用于本地；生产必须关闭 `DEMO_AUTH_ENABLED` |
 
-## 应用层认证与限流 Roadmap（首期 · P2）
+仓库级扫描：
 
-> **现状**：MVP 无内置登录；安全依赖 SqlGuard + 网络隔离。以下为首期可落地路径，与 README Roadmap「用户与权限」对齐。
+```bash
+node scripts/check-secrets.mjs
+```
 
-| 阶段 | 能力 | 实现要点 | 验收 |
-| --- | --- | --- | --- |
-| **Phase 1a** | API Key 网关 | Nginx / Spring `OncePerRequestFilter` 校验 `X-API-Key`；Key 仅环境变量注入 | 未带 Key 返回 401；smoke 脚本带 Key 通过 |
-| **Phase 1b** | 按 IP 限流 | Bucket4j 或网关 `limit_req`；默认 60 req/min/Key | k6 超限返回 429，正常流量 P95 不变 |
-| **Phase 2** | 用户会话 + 数据源 ACL | Spring Security + H2 用户表；数据源按 `ownerId` 过滤 | 用户 A 不可见用户 B 的数据源配置 |
-| **Phase 3** | 行列级权限 | 语义层绑定角色；SqlGuard 追加 `WHERE tenant_id = ?` | 集成测试覆盖越权拒绝 |
+## 生产启动闸门
 
-**首期推荐（作品集 → 内网试点）**：先落地 **Phase 1a + 1b**（约 1–2 人日），公网演示一律经反向代理终止 TLS 并启用 Key；业务库账号保持只读。
+`CHATBI_PRODUCTION_MODE=true` 时，以下任一情况会阻止启动：
 
-## 依赖与供应链
+- `CHATBI_SECRET` 为空或仍为开发默认值；
+- 演示认证仍启用；
+- Cookie 未启用 Secure；
+- CORS 使用通配来源。
 
-- 后端：Maven 依赖定期 `mvn versions:display-dependency-updates` 审查。
-- 前端：`npm audit`（CI 可选）。
-- 基础镜像：定期重建 `backend` / `frontend` Dockerfile 以获取安全补丁。
+生产还应设置：
 
-## 日志与审计
+```dotenv
+CHATBI_PRODUCTION_MODE=true
+CHATBI_SECRET=<random-secret>
+CHATBI_COOKIE_SECURE=true
+CHATBI_ALLOWED_ORIGINS=https://bi.example.com
+DEMO_AUTH_ENABLED=false
+DEMO_DATASOURCE_ENABLED=false
+DEMO_PG_ENABLED=false
+```
 
-- 查询历史持久化在 H2（`backend-data` 卷）；含自然语言问题、生成 SQL、执行结果摘要。
-- 生产建议：集中日志、保留策略合规、限制日志中 LLM Key 与数据库密码输出（当前实现不打印 Key）。
+## 上线检查清单
 
-## 生产上线检查清单
+- [ ] 仅通过 HTTPS 暴露前端；后端和目标数据库不直接暴露公网。
+- [ ] 关闭演示账号、演示数据源和默认口令。
+- [ ] 设置并备份随机 `CHATBI_SECRET`。
+- [ ] 为每个业务库创建独立只读账号，并在 UI 中通过只读核验。
+- [ ] 按用户授予数据源、表、敏感列、导出和语义管理权限。
+- [ ] 校准查询超时、行数、扫描确认和硬阻断预算。
+- [ ] 备份元数据库并验证恢复；恢复时使用相同加密密钥。
+- [ ] 将审计日志接入保留和告警策略。
+- [ ] 运行后端测试、真实双库测试、前端质量门槛、Mock smoke 和密钥扫描。
 
-- [ ] 修改 `CHATBI_SECRET` 为随机长字符串
-- [ ] 设置真实 `LLM_API_KEY`，Key 权限最小化
-- [ ] `DEMO_DATASOURCE_ENABLED=false`（或移除 Demo MySQL 服务）
-- [ ] 业务数据源使用**只读**数据库账号
-- [ ] 配置反向代理 TLS（HTTPS）
-- [ ] 限制 `/api` 仅内网或经网关鉴权可达
-- [ ] 备份 `backend-data` 卷（H2 元数据）
-- [ ] 确认 `chatbi.sql-guard.default-limit` / `max-limit` 符合 SLA
+## 可复核测试
+
+```bash
+cd backend
+mvn -Dtest=SecurityIntegrationTest,DataAccessPolicyTest,SecureQueryValidatorIntegrationTest,SqlGuardTest,HistorySecurityIntegrationTest,ExcelExportServiceTest test
+mvn -Dtest=RealDatabaseSafetyIT test
+```
+
+测试覆盖 401/403、CSRF、注销撤销、跨用户访问、敏感列、通配符、历史/快照/导出撤权、危险 SQL、双库只读授权和写入拒绝。
 
 ## 漏洞反馈
 
-请在私有渠道联系维护者，勿在公开 Issue 中粘贴 Key、连接串或生产 SQL 样本。
+请通过私有渠道报告，勿在公开 Issue 中粘贴密钥、连接串、Cookie、生产 SQL 或业务数据。

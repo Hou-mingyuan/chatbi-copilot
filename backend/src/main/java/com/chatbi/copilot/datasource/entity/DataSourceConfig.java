@@ -38,6 +38,12 @@ public class DataSourceConfig {
 
     private String remark;
 
+    private Long createdBy;
+
+    private Integer verifiedReadOnly;
+
+    private LocalDateTime lastVerifiedAt;
+
     @TableLogic
     private Integer deleted;
 

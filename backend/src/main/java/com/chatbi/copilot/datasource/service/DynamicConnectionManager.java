@@ -3,6 +3,9 @@ package com.chatbi.copilot.datasource.service;
 import com.chatbi.copilot.common.BusinessException;
 import com.chatbi.copilot.common.PasswordCipher;
 import com.chatbi.copilot.datasource.entity.DataSourceConfig;
+import com.chatbi.copilot.datasource.dto.ConnectionTestResult;
+import com.chatbi.copilot.datasource.service.readonly.ReadOnlyAccountVerifier;
+import com.chatbi.copilot.datasource.service.readonly.ReadOnlyVerification;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import jakarta.annotation.PreDestroy;
@@ -13,6 +16,7 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.util.Map;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -24,13 +28,21 @@ import java.util.concurrent.ConcurrentHashMap;
 public class DynamicConnectionManager {
 
     private final PasswordCipher cipher;
+    private final JdbcParameterPolicy jdbcParameterPolicy;
+    private final List<ReadOnlyAccountVerifier> readOnlyVerifiers;
     private final Map<Long, HikariDataSource> pools = new ConcurrentHashMap<>();
 
-    public DynamicConnectionManager(PasswordCipher cipher) {
+    public DynamicConnectionManager(PasswordCipher cipher, JdbcParameterPolicy jdbcParameterPolicy,
+                                    List<ReadOnlyAccountVerifier> readOnlyVerifiers) {
         this.cipher = cipher;
+        this.jdbcParameterPolicy = jdbcParameterPolicy;
+        this.readOnlyVerifiers = readOnlyVerifiers;
     }
 
     public DataSource getPool(DataSourceConfig config) {
+        if (!Integer.valueOf(1).equals(config.getVerifiedReadOnly())) {
+            throw new BusinessException("Datasource must pass read-only account verification before use");
+        }
         return pools.computeIfAbsent(config.getId(), id -> buildPool(config));
     }
 
@@ -46,13 +58,14 @@ public class DynamicConnectionManager {
         hc.setIdleTimeout(60_000);
         hc.setMaxLifetime(600_000);
         hc.setReadOnly(true); // defense in depth on top of the SQL guard
+        hc.setConnectionInitSql(connectionInitSql(config.getDbType()));
         hc.setPoolName("target-ds-" + config.getId());
         log.info("Creating connection pool for datasource id={} ({})", config.getId(), config.getName());
         return new HikariDataSource(hc);
     }
 
     /** Validate a connection using a throwaway (non-pooled) connection. */
-    public void testConnection(DataSourceConfig config) {
+    public ConnectionTestResult testConnection(DataSourceConfig config) {
         String url = buildJdbcUrl(config);
         String password = cipher.decrypt(config.getPassword());
         try {
@@ -64,8 +77,24 @@ public class DynamicConnectionManager {
             if (!conn.isValid(5)) {
                 throw new BusinessException("Connection is not valid");
             }
+            conn.setReadOnly(true);
+            ReadOnlyAccountVerifier verifier = readOnlyVerifiers.stream()
+                    .filter(candidate -> candidate.supports(config.getDbType()))
+                    .findFirst()
+                    .orElseThrow(() -> new BusinessException("No read-only verifier for " + config.getDbType()));
+            ReadOnlyVerification verification = verifier.verify(conn);
+            if (!verification.readOnly()) {
+                throw new BusinessException("Database account has write-capable privileges; use a SELECT-only account");
+            }
+            return new ConnectionTestResult(true, true,
+                    conn.getMetaData().getDatabaseProductName(),
+                    conn.getMetaData().getDatabaseProductVersion(), verification.evidence());
         } catch (Exception e) {
-            throw new BusinessException("Connection failed: " + e.getMessage());
+            if (e instanceof BusinessException businessException) {
+                throw businessException;
+            }
+            log.warn("Datasource connection verification failed: {}", e.getMessage());
+            throw new BusinessException("Connection could not be verified");
         }
     }
 
@@ -79,13 +108,13 @@ public class DynamicConnectionManager {
 
     public String buildJdbcUrl(DataSourceConfig c) {
         String type = c.getDbType() == null ? "" : c.getDbType().toLowerCase();
-        String params = c.getJdbcParams();
+        String params = jdbcParameterPolicy.sanitize(c.getDbType(), c.getJdbcParams());
         boolean hasParams = params != null && !params.isBlank();
         switch (type) {
             case "mysql" -> {
                 String base = "jdbc:mysql://" + c.getHost() + ":" + c.getPort() + "/" + c.getDatabaseName();
                 // useInformationSchema + remarks make DatabaseMetaData return table/column comments
-                String def = "useSSL=false&serverTimezone=UTC&useInformationSchema=true&remarks=true"
+                String def = "sslMode=PREFERRED&serverTimezone=UTC&useInformationSchema=true&remarks=true"
                         + "&useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull"
                         + "&allowPublicKeyRetrieval=true";
                 return base + "?" + def + (hasParams ? "&" + params : "");
@@ -96,6 +125,12 @@ public class DynamicConnectionManager {
             }
             default -> throw new BusinessException("Unsupported dbType: " + c.getDbType());
         }
+    }
+
+    private String connectionInitSql(String dbType) {
+        return dbType != null && dbType.toLowerCase().startsWith("postg")
+                ? "SET default_transaction_read_only = on"
+                : "SET SESSION TRANSACTION READ ONLY";
     }
 
     private String driverClass(String dbType) {

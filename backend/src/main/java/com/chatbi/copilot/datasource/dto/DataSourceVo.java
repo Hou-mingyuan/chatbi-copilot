@@ -20,6 +20,11 @@ public class DataSourceVo {
     private String username;
     private String jdbcParams;
     private String remark;
+    private boolean verifiedReadOnly;
+    private boolean canQuery;
+    private boolean canExport;
+    private boolean canManageSemantic;
+    private LocalDateTime lastVerifiedAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
@@ -34,6 +39,8 @@ public class DataSourceVo {
         vo.setUsername(c.getUsername());
         vo.setJdbcParams(c.getJdbcParams());
         vo.setRemark(c.getRemark());
+        vo.setVerifiedReadOnly(Integer.valueOf(1).equals(c.getVerifiedReadOnly()));
+        vo.setLastVerifiedAt(c.getLastVerifiedAt());
         vo.setCreatedAt(c.getCreatedAt());
         vo.setUpdatedAt(c.getUpdatedAt());
         return vo;

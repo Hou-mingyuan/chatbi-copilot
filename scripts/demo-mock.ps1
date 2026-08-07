@@ -9,16 +9,16 @@ if (-not (Test-Path ".env")) {
   Write-Host "Created .env (LLM_PROVIDER=mock, keys optional)."
 }
 
-Write-Host "Starting docker compose (mock LLM + demo MySQL)..."
-docker compose up -d --build
+Write-Host "Starting docker compose (mock LLM + demo MySQL/PostgreSQL)..."
+docker compose up -d --build --wait
 
-$baseUrl = if ($env:CHATBI_SMOKE_BASE_URL) { $env:CHATBI_SMOKE_BASE_URL } else { "http://localhost:8080" }
+$baseUrl = if ($env:CHATBI_SMOKE_BASE_URL) { $env:CHATBI_SMOKE_BASE_URL } else { "http://127.0.0.1:19030" }
 Write-Host "Running mock demo smoke..."
 node scripts/smoke-mock-demo.mjs $baseUrl
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-$backendPort = if ($env:BACKEND_HOST_PORT) { $env:BACKEND_HOST_PORT } else { "8080" }
-$frontendPort = if ($env:FRONTEND_HOST_PORT) { $env:FRONTEND_HOST_PORT } else { "8888" }
+$backendPort = if ($env:BACKEND_HOST_PORT) { $env:BACKEND_HOST_PORT } else { "19030" }
+$frontendPort = if ($env:FRONTEND_HOST_PORT) { $env:FRONTEND_HOST_PORT } else { "19031" }
 Write-Host @"
 
 Mock demo is up.

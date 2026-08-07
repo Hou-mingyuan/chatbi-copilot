@@ -73,6 +73,7 @@ class PromptBuilderTest {
         assertTrue(prompt.contains("MySQL"), prompt);
         assertTrue(prompt.contains("needClarification"), prompt);
         assertTrue(prompt.toLowerCase().contains("select"), prompt);
+        assertTrue(prompt.contains("business-readable names"), prompt);
     }
 
     @Test
@@ -98,5 +99,22 @@ class PromptBuilderTest {
         assertEquals("user", messages.get(1).getRole());
         assertEquals("上个月销售额?", messages.get(1).getContent());
         assertEquals("assistant", messages.get(2).getRole());
+    }
+
+    @Test
+    @DisplayName("Clarification turns preserve the preceding constraints for the follow-up")
+    void buildMessagesWithClarificationHistory() {
+        HistoryTurn turn = new HistoryTurn();
+        turn.setQuestion("2024年各大区怎么样？");
+        turn.setClarification("请说明要分析的指标、分组维度和时间范围。");
+
+        List<ChatMessage> messages = promptBuilder.buildMessages(
+                sampleSchema(), "看已支付订单销售额。", List.of(turn));
+
+        assertEquals(4, messages.size());
+        assertEquals("2024年各大区怎么样？", messages.get(1).getContent());
+        assertTrue(messages.get(2).getContent().contains("needClarification\": true"));
+        assertEquals("看已支付订单销售额。", messages.get(3).getContent());
+        assertTrue(messages.get(0).getContent().contains("combine the preceding user request"));
     }
 }

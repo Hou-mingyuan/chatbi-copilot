@@ -9,5 +9,11 @@ chatbi:
     host: ${DEMO_DB_HOST:mysql}
     port: ${DEMO_DB_PORT:3306}
     database-name: ${DEMO_DB_NAME:chatbi_demo}
-    username: ${DEMO_DB_USER:chatbi}
-    password: ${DEMO_DB_PASSWORD:chatbi123}
+    username: ${DEMO_DB_USER:chatbi_ro}
+    password: ${DEMO_DB_PASSWORD:ChatBI!Readonly123}
+    postgres-enabled: ${DEMO_PG_ENABLED:true}
+    postgres-host: ${DEMO_PG_HOST:postgres}
+    postgres-port: ${DEMO_PG_PORT:5432}
+    postgres-database-name: ${DEMO_PG_DB_NAME:chatbi_demo}
+    postgres-username: ${DEMO_PG_USER:chatbi_ro}
+    postgres-password: ${DEMO_PG_PASSWORD:ChatBI!Readonly123}

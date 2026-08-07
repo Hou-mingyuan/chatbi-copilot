@@ -1,6 +1,7 @@
 package com.chatbi.copilot.common;
 
 import lombok.Data;
+import org.slf4j.MDC;
 
 /**
  * Uniform API envelope. {@code code == 0} means success.
@@ -11,6 +12,7 @@ public class ApiResponse<T> {
     private int code;
     private String message;
     private T data;
+    private String requestId;
 
     public ApiResponse() {
     }
@@ -19,6 +21,7 @@ public class ApiResponse<T> {
         this.code = code;
         this.message = message;
         this.data = data;
+        this.requestId = MDC.get(RequestIdFilter.MDC_KEY);
     }
 
     public static <T> ApiResponse<T> ok(T data) {

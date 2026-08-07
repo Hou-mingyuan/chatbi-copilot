@@ -20,6 +20,8 @@ import java.util.regex.Pattern;
 public class ChartRecommender {
 
     private static final Pattern ID_LIKE = Pattern.compile("(?i)(^id$|_id$|code$|^no$|_no$)");
+    private static final Pattern TIME_LIKE = Pattern.compile(
+            "(?i)(^|_)(date|time|day|week|month|quarter|year)($|_)");
     private static final int PIE_MAX_SLICES = 8;
 
     public ChartRecommendation recommend(List<ColumnMeta> columns, List<Map<String, Object>> rows) {
@@ -37,7 +39,11 @@ public class ChartRecommender {
             String category = classify(c);
             c.setCategory(category);
             switch (category) {
-                case "measure" -> measures.add(c);
+                case "measure" -> {
+                    if (isChartSafeMeasure(c, rows)) {
+                        measures.add(c);
+                    }
+                }
                 case "time" -> times.add(c);
                 default -> dimensions.add(c);
             }
@@ -83,7 +89,9 @@ public class ChartRecommender {
 
     private String classify(ColumnMeta c) {
         String type = c.getType() == null ? "" : c.getType().toUpperCase();
-        if (type.contains("DATE") || type.contains("TIME") || type.contains("YEAR")) {
+        String name = c.getName() == null ? "" : c.getName();
+        if (type.contains("DATE") || type.contains("TIME") || type.contains("YEAR")
+                || TIME_LIKE.matcher(name).find()) {
             return "time";
         }
         boolean numeric = type.contains("INT") || type.contains("DEC") || type.contains("NUM")
@@ -93,5 +101,23 @@ public class ChartRecommender {
             return "measure";
         }
         return "dimension";
+    }
+
+    private boolean isChartSafeMeasure(ColumnMeta column, List<Map<String, Object>> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return true;
+        }
+        boolean found = false;
+        for (Map<String, Object> row : rows) {
+            Object value = row.get(column.getName());
+            if (value == null) {
+                continue;
+            }
+            found = true;
+            if (!(value instanceof Number number) || !Double.isFinite(number.doubleValue())) {
+                return false;
+            }
+        }
+        return found;
     }
 }

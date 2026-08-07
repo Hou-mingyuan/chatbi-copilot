@@ -1,0 +1,18 @@
+{
+  "baseUrl": "http://127.0.0.1:19034/api",
+  "iterations": 15,
+  "concurrency": 3,
+  "successful": 15,
+  "errors": [],
+  "p95Ms": {
+    "authenticatedRead": 100.87,
+    "queryJobCreate": 207.75,
+    "queryComplete": 676.99
+  },
+  "budgetsMs": {
+    "authenticatedRead": 300,
+    "queryJobCreate": 800,
+    "queryComplete": 800
+  },
+  "passed": true
+}

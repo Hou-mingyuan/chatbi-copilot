@@ -1,6 +1,7 @@
 package com.chatbi.copilot.text2sql.dto;
 
 import com.chatbi.copilot.chart.ChartRecommendation;
+import com.chatbi.copilot.text2sql.plan.QueryRisk;
 import lombok.Data;
 
 import java.util.ArrayList;
@@ -13,6 +14,9 @@ import java.util.Map;
  */
 @Data
 public class QueryResult {
+
+    private Long queryId;
+    private String sessionId;
 
     private Long datasourceId;
     private String question;
@@ -28,6 +32,9 @@ public class QueryResult {
     private int rowCount;
     private boolean truncated;
     private long elapsedMs;
+    private boolean requiresConfirmation;
+    private QueryRisk risk;
+    private ResultSummary summary;
 
     private ChartRecommendation chart;
 }

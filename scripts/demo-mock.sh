@@ -9,17 +9,17 @@ if [[ ! -f .env ]]; then
   echo "Created .env (LLM_PROVIDER=mock, keys optional)."
 fi
 
-echo "Starting docker compose (mock LLM + demo MySQL)..."
-docker compose up -d --build
+echo "Starting docker compose (mock LLM + demo MySQL/PostgreSQL)..."
+docker compose up -d --build --wait
 
 echo "Running mock demo smoke..."
-node scripts/smoke-mock-demo.mjs "${CHATBI_SMOKE_BASE_URL:-http://localhost:8080}"
+node scripts/smoke-mock-demo.mjs "${CHATBI_SMOKE_BASE_URL:-http://127.0.0.1:19030}"
 
 cat <<EOF
 
 Mock demo is up.
-  Web UI:  http://localhost:${FRONTEND_HOST_PORT:-8888}/
-  API:     http://localhost:${BACKEND_HOST_PORT:-8080}/api/health
+  Web UI:  http://localhost:${FRONTEND_HOST_PORT:-19031}/
+  API:     http://localhost:${BACKEND_HOST_PORT:-19030}/api/health
 
 Try asking: 「各产品类目的销售额占比」
 Follow-up: 「只看华东大区」

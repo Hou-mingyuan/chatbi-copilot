@@ -31,6 +31,7 @@ public class LlmController {
         Map<String, Object> status = new LinkedHashMap<>();
         status.put("provider", props.getProvider());
         status.put("model", props.getModel());
+        status.put("apiStyle", props.getApiStyle());
         status.put("baseUrl", props.getBaseUrl());
         status.put("hasApiKey", props.getApiKey() != null && !props.getApiKey().isBlank());
         status.put("mockMode", "mock".equalsIgnoreCase(String.valueOf(props.getProvider()).trim()));

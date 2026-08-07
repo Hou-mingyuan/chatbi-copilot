@@ -44,6 +44,8 @@ CREATE TABLE orders (
     channel      VARCHAR(16),
     total_amount DECIMAL(12,2)
 );
+CREATE INDEX idx_orders_date ON orders(order_date);
+CREATE INDEX idx_orders_customer ON orders(customer_id);
 COMMENT ON TABLE orders IS '销售订单表';
 COMMENT ON COLUMN orders.id IS '订单ID';
 COMMENT ON COLUMN orders.customer_id IS '下单客户ID';
@@ -60,6 +62,8 @@ CREATE TABLE order_items (
     unit_price DECIMAL(12,2),
     amount     DECIMAL(12,2)
 );
+CREATE INDEX idx_items_order ON order_items(order_id);
+CREATE INDEX idx_items_product ON order_items(product_id);
 COMMENT ON TABLE order_items IS '订单明细表';
 COMMENT ON COLUMN order_items.id IS '明细ID';
 COMMENT ON COLUMN order_items.order_id IS '订单ID';
