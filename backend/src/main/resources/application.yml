@@ -1,5 +1,5 @@
 server:
-  port: 8080
+  port: ${SERVER_PORT:19030}
   servlet:
     context-path: /api
 
@@ -9,18 +9,29 @@ spring:
   # H2 file storage for application metadata (datasources / history / favorites / semantic layer).
   # Zero external dependency: the app boots even without any target DB configured.
   datasource:
-    url: jdbc:h2:file:./data/chatbi;AUTO_SERVER=TRUE;MODE=MySQL;DB_CLOSE_ON_EXIT=FALSE
+    # Single application process owns this file. H2 2.x rejects AUTO_SERVER together
+    # with DB_CLOSE_ON_EXIT=FALSE, so keep the portable single-process form here.
+    url: jdbc:h2:file:./data/chatbi;MODE=MySQL;DB_CLOSE_ON_EXIT=FALSE
     driver-class-name: org.h2.Driver
     username: sa
     password: ""
   sql:
     init:
-      mode: always
-      schema-locations: classpath:db/schema-h2.sql
+      mode: never
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    baseline-version: 0
+    validate-on-migrate: true
   h2:
     console:
-      enabled: true
+      enabled: false
       path: /h2-console
+  jackson:
+    deserialization:
+      use-big-decimal-for-floats: true
+      use-big-integer-for-ints: true
 
 mybatis-plus:
   configuration:
@@ -44,20 +55,41 @@ springdoc:
 chatbi:
   llm:
     # provider is informational; any OpenAI-compatible endpoint works (DeepSeek / OpenAI / Qwen(DashScope compatible) / Ollama).
-    provider: ${LLM_PROVIDER:deepseek}
+    provider: ${LLM_PROVIDER:mock}
     base-url: ${LLM_BASE_URL:https://api.deepseek.com/v1}
     api-key: ${LLM_API_KEY:}
     model: ${LLM_MODEL:deepseek-chat}
+    api-style: ${LLM_API_STYLE:chat-completions}
     temperature: ${LLM_TEMPERATURE:0.0}
     max-tokens: ${LLM_MAX_TOKENS:2048}
+    reasoning-effort: ${LLM_REASONING_EFFORT:none}
     timeout-seconds: ${LLM_TIMEOUT_SECONDS:60}
   sql-guard:
     # Only read-only single SELECT statements are allowed; a LIMIT is force-injected when missing.
     default-limit: 500
     max-limit: 5000
+    max-offset: 100000
+    query-timeout-seconds: 15
+    max-estimated-rows: 100000
+    confirm-estimated-rows: 10000
+  query-jobs:
+    total-timeout-seconds: 90
+    max-active-per-user: 3
+    core-pool-size: 2
+    max-pool-size: 4
+    queue-capacity: 50
   security:
     # Used to encrypt stored datasource passwords (AES-GCM). CHANGE THIS in production.
     secret: ${CHATBI_SECRET:chatbi-copilot-dev-secret-change-me}
+    production-mode: ${CHATBI_PRODUCTION_MODE:false}
+    cookie-secure: ${CHATBI_COOKIE_SECURE:false}
+    session-hours: ${CHATBI_SESSION_HOURS:8}
+    csrf-cookie-name: ${AUTH_CSRF_COOKIE_NAME:CHATBI_CSRF}
+    allowed-origins: ${CHATBI_ALLOWED_ORIGINS:http://localhost:19031,http://127.0.0.1:19031}
+    demo-auth-enabled: ${DEMO_AUTH_ENABLED:true}
+    demo-admin-password: ${DEMO_ADMIN_PASSWORD:ChatBI!Admin123}
+    demo-analyst-password: ${DEMO_ANALYST_PASSWORD:ChatBI!Analyst123}
+    demo-viewer-password: ${DEMO_VIEWER_PASSWORD:ChatBI!Viewer123}
   demo-datasource:
     # When enabled, the app auto-registers a demo datasource on startup so you can query immediately.
     enabled: ${DEMO_DATASOURCE_ENABLED:false}
@@ -66,8 +98,15 @@ chatbi:
     host: ${DEMO_DB_HOST:localhost}
     port: ${DEMO_DB_PORT:3306}
     database-name: ${DEMO_DB_NAME:chatbi_demo}
-    username: ${DEMO_DB_USER:chatbi}
-    password: ${DEMO_DB_PASSWORD:chatbi123}
+    username: ${DEMO_DB_USER:chatbi_ro}
+    password: ${DEMO_DB_PASSWORD:ChatBI!Readonly123}
+    postgres-enabled: ${DEMO_PG_ENABLED:false}
+    postgres-name: Demo - Sales (PostgreSQL)
+    postgres-host: ${DEMO_PG_HOST:localhost}
+    postgres-port: ${DEMO_PG_PORT:5432}
+    postgres-database-name: ${DEMO_PG_DB_NAME:chatbi_demo}
+    postgres-username: ${DEMO_PG_USER:chatbi_ro}
+    postgres-password: ${DEMO_PG_PASSWORD:ChatBI!Readonly123}
 
 logging:
   level:

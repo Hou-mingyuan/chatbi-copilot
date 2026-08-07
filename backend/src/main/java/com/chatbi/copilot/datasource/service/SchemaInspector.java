@@ -37,12 +37,12 @@ public class SchemaInspector {
         if (!refresh) {
             SchemaInfo cached = cache.get(config.getId());
             if (cached != null) {
-                return cached;
+                return copy(cached);
             }
         }
         SchemaInfo info = doInspect(config);
         cache.put(config.getId(), info);
-        return info;
+        return copy(info);
     }
 
     public void evict(Long id) {
@@ -105,5 +105,32 @@ public class SchemaInspector {
             log.debug("Could not read primary keys for {}: {}", table, e.getMessage());
         }
         return pks;
+    }
+
+    private SchemaInfo copy(SchemaInfo source) {
+        SchemaInfo target = new SchemaInfo();
+        target.setDatasourceId(source.getDatasourceId());
+        target.setDatabaseName(source.getDatabaseName());
+        target.setDbType(source.getDbType());
+        for (TableSchema table : source.getTables()) {
+            TableSchema tableCopy = new TableSchema();
+            tableCopy.setName(table.getName());
+            tableCopy.setComment(table.getComment());
+            tableCopy.setBusinessAlias(table.getBusinessAlias());
+            tableCopy.setBusinessDescription(table.getBusinessDescription());
+            for (ColumnSchema column : table.getColumns()) {
+                ColumnSchema columnCopy = new ColumnSchema();
+                columnCopy.setName(column.getName());
+                columnCopy.setDataType(column.getDataType());
+                columnCopy.setComment(column.getComment());
+                columnCopy.setNullable(column.isNullable());
+                columnCopy.setPrimaryKey(column.isPrimaryKey());
+                columnCopy.setBusinessAlias(column.getBusinessAlias());
+                columnCopy.setBusinessDescription(column.getBusinessDescription());
+                tableCopy.getColumns().add(columnCopy);
+            }
+            target.getTables().add(tableCopy);
+        }
+        return target;
     }
 }

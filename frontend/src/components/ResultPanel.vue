@@ -1,48 +1,71 @@
 <script setup>
-import { ref, computed, defineAsyncComponent } from 'vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { api } from '@/api'
+import { api, errorMessage } from '@/api'
 import { downloadBlob } from '@/utils/download'
+import { hasChartableValues } from '@/utils/chartData'
 
 const ChartRenderer = defineAsyncComponent(() => import('./ChartRenderer.vue'))
-
 const props = defineProps({
-  result: { type: Object, required: true }
+  result: { type: Object, required: true },
+  canExport: { type: Boolean, default: true }
 })
-
 const emit = defineEmits(['drilldown'])
 
-const hasRows = computed(() => (props.result.rows || []).length > 0)
+const rows = computed(() => props.result.rows || [])
+const columns = computed(() => props.result.columns || [])
 const recommended = computed(() => props.result.chart || {})
-const chartType = ref(
-  recommended.value.type && recommended.value.type !== 'table' ? recommended.value.type : 'bar'
-)
-const activeTab = ref(
-  recommended.value.type && recommended.value.type !== 'table' && hasRows.value ? 'chart' : 'table'
-)
+const hasRows = computed(() => rows.value.length > 0)
 const sqlExpanded = ref(false)
 const drillFilter = ref(null)
 
+function firstDimension() {
+  return columns.value.find((column) => column.category !== 'measure')?.name || columns.value[0]?.name
+}
+
+function firstMeasures() {
+  const measures = columns.value.filter((column) => column.category === 'measure').map((column) => column.name)
+  return measures.length ? measures : columns.value.slice(1).map((column) => column.name)
+}
+
+const xField = computed(() => recommended.value.xField || firstDimension())
+const yFields = computed(() => recommended.value.yFields?.length ? recommended.value.yFields : firstMeasures())
+const chartable = computed(() =>
+  recommended.value.type !== 'table' &&
+  Boolean(xField.value) &&
+  hasChartableValues(rows.value, yFields.value)
+)
+const chartType = ref(['bar', 'line', 'pie'].includes(recommended.value.type) ? recommended.value.type : 'bar')
+const activeTab = ref(chartable.value ? 'chart' : 'table')
 const displayRows = computed(() => {
-  const rows = props.result.rows || []
-  if (!drillFilter.value) return rows
-  const { dimension, value } = drillFilter.value
-  return rows.filter((r) => String(r[dimension]) === String(value))
+  if (!drillFilter.value) return rows.value
+  return rows.value.filter((row) => String(row[drillFilter.value.dimension]) === String(drillFilter.value.value))
+})
+const displayRowCount = computed(() => drillFilter.value ? displayRows.value.length : props.result.rowCount)
+const sqlPreview = computed(() => {
+  const sql = String(props.result.sql || '').trim()
+  if (sql.length <= 220) return sql
+  return `${sql.slice(0, 220)}…`
 })
 
-const displayRowCount = computed(() =>
-  drillFilter.value ? displayRows.value.length : props.result.rowCount
-)
+function formatCell(value, column) {
+  if (value == null || value === '') return '—'
+  if (column?.category === 'measure' && typeof value === 'number') {
+    return value.toLocaleString('zh-CN', { maximumFractionDigits: 8 })
+  }
+  return value
+}
+
+function columnLabel(column) {
+  if (column.category === 'measure') return `${column.name} · 指标`
+  if (column.category === 'dimension') return `${column.name} · 维度`
+  return column.name
+}
 
 function onChartDrill(payload) {
   const dimension = payload.dimension || xField.value
   const value = payload.label ?? payload.value
-  drillFilter.value = {
-    dimension,
-    value,
-    dataIndex: payload.index ?? payload.dataIndex ?? null,
-    label: String(value),
-  }
+  drillFilter.value = { dimension, value, dataIndex: payload.index ?? null, label: String(value) }
   activeTab.value = 'table'
 }
 
@@ -52,223 +75,141 @@ function clearDrill() {
 
 function confirmDrilldown() {
   if (!drillFilter.value) return
-  emit('drilldown', {
-    ...drillFilter.value,
-    question: props.result.question,
-  })
-}
-
-const chartTypeLabels = { bar: '柱状图', line: '折线图', pie: '饼图', table: '表格' }
-
-const recommendedLabel = computed(() => {
-  const t = recommended.value.type || 'table'
-  return chartTypeLabels[t] || t
-})
-
-const sqlPreview = computed(() => {
-  const sql = (props.result.sql || '').trim()
-  if (!sql) return ''
-  const lines = sql.split('\n')
-  return lines.length <= 3 && sql.length <= 180 ? sql : lines.slice(0, 3).join('\n') + (lines.length > 3 ? '\n…' : '')
-})
-
-const previewRows = computed(() => (props.result.rows || []).slice(0, 4))
-
-function formatCell(value, col) {
-  if (value == null || value === '') return '—'
-  if (col?.category === 'measure' && typeof value === 'number') {
-    return value.toLocaleString('zh-CN', { maximumFractionDigits: 4 })
-  }
-  return value
-}
-
-function columnLabel(col) {
-  if (col.category === 'measure') return `${col.name} · 指标`
-  if (col.category === 'dimension') return `${col.name} · 维度`
-  return col.name
-}
-
-const xField = computed(() => recommended.value.xField || firstDimension())
-const yFields = computed(() =>
-  recommended.value.yFields && recommended.value.yFields.length
-    ? recommended.value.yFields
-    : firstMeasures()
-)
-
-function firstDimension() {
-  const c = (props.result.columns || []).find((x) => x.category !== 'measure')
-  return c ? c.name : props.result.columns?.[0]?.name
-}
-function firstMeasures() {
-  const ms = (props.result.columns || []).filter((x) => x.category === 'measure').map((x) => x.name)
-  return ms.length ? ms : props.result.columns?.slice(1).map((x) => x.name) || []
+  emit('drilldown', { ...drillFilter.value, question: props.result.question })
 }
 
 async function copySql() {
   try {
     await navigator.clipboard.writeText(props.result.sql || '')
     ElMessage.success('SQL 已复制')
-  } catch (e) {
-    ElMessage.warning('复制失败，请手动选择')
+  } catch {
+    ElMessage.warning('复制失败，请手动选择 SQL')
   }
 }
 
 async function exportExcel() {
   try {
-    const resp = await api.exportExcel({
-      datasourceId: props.result.datasourceId,
-      sql: props.result.sql
-    })
-    downloadBlob(resp, 'chatbi-export.xlsx')
-    ElMessage.success('已导出 Excel')
-  } catch (e) {
-    /* handled by interceptor */
+    const response = await api.exportExcel(props.result.queryId)
+    downloadBlob(response, `chatbi-query-${props.result.queryId}.xlsx`)
+    ElMessage.success('已从结果快照导出 Excel')
+  } catch (error) {
+    ElMessage.error(errorMessage(error))
   }
 }
 
 async function saveFavorite() {
   try {
-    const { value } = await ElMessageBox.prompt('给这个查询取个名字', '收藏查询', {
+    const { value } = await ElMessageBox.prompt('输入收藏名称', '收藏查询', {
       confirmButtonText: '保存',
       cancelButtonText: '取消',
-      inputValue: props.result.question || ''
+      inputValue: props.result.question || '',
+      inputValidator: (text) => Boolean(text?.trim()) || '名称不能为空'
     })
-    await api.createFavorite({
-      datasourceId: props.result.datasourceId,
-      title: value,
-      question: props.result.question,
-      sql: props.result.sql
-    })
-    ElMessage.success('已收藏')
-  } catch (e) {
-    /* cancelled or handled */
+    await api.createFavorite({ queryId: props.result.queryId, title: value.trim() })
+    ElMessage.success('已收藏当前结果快照')
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close' && error?.message !== 'cancel') {
+      ElMessage.error(errorMessage(error))
+    }
   }
 }
 </script>
 
 <template>
   <div class="result-panel">
-    <div v-if="result.question" class="question-echo">
-      <span class="label">问</span>
-      <span class="text">{{ result.question }}</span>
-    </div>
-
-    <el-alert
-      v-if="result.explanation"
-      :title="result.explanation"
-      type="info"
-      :closable="false"
-      show-icon
-      class="explain"
-    />
-
-    <div class="sql-preview">
-      <div class="sql-preview-head">
-        <span class="sql-label">生成 SQL</span>
-        <el-tag size="small" type="primary" effect="plain">{{ recommendedLabel }}</el-tag>
-        <span class="spacer" />
-        <el-button size="small" text :icon="'DocumentCopy'" @click="copySql">复制</el-button>
-        <el-button size="small" text @click="sqlExpanded = !sqlExpanded">
-          {{ sqlExpanded ? '收起' : '展开' }}
-        </el-button>
-      </div>
-      <pre class="sql-block" :class="{ expanded: sqlExpanded }">{{ sqlExpanded ? result.sql : sqlPreview }}</pre>
-    </div>
-
-    <div class="meta">
-      <el-tag size="small" type="success" effect="plain">{{ displayRowCount }} 行</el-tag>
-      <el-tag v-if="drillFilter" size="small" type="warning" effect="plain" closable @close="clearDrill">
-        钻取：{{ drillFilter.dimension }} = {{ drillFilter.value }}
-      </el-tag>
-      <el-tag size="small" type="info" effect="plain">{{ result.elapsedMs }} ms</el-tag>
-      <el-tag v-if="result.truncated" size="small" type="warning" effect="plain">
-        结果已截断
-      </el-tag>
-      <span class="spacer" />
-      <el-button size="small" text :icon="'Star'" @click="saveFavorite">收藏</el-button>
-      <el-button size="small" text :icon="'Download'" @click="exportExcel" :disabled="!hasRows">
-        导出 Excel
-      </el-button>
-    </div>
-
-    <div v-if="hasRows && previewRows.length" class="preview-cards">
-      <div v-for="(row, idx) in previewRows" :key="idx" class="preview-card">
-        <div v-for="col in result.columns?.slice(0, 3)" :key="col.name" class="preview-cell">
-          <span class="k">{{ col.name }}</span>
-          <span class="v">{{ row[col.name] }}</span>
+    <section v-if="result.summary?.text || result.explanation" class="insight-block">
+      <p class="eyebrow">数据解读</p>
+      <p class="insight-text">{{ result.summary?.text || result.explanation }}</p>
+      <dl v-if="result.summary?.facts?.length" class="fact-grid">
+        <div v-for="fact in result.summary.facts" :key="`${fact.label}-${fact.column}`">
+          <dt>{{ fact.label }}</dt>
+          <dd>{{ fact.value }}<small v-if="fact.unit"> {{ fact.unit }}</small></dd>
         </div>
-      </div>
-      <span v-if="result.rowCount > previewRows.length" class="more-hint">
-        还有 {{ result.rowCount - previewRows.length }} 行，见下方表格
-      </span>
+      </dl>
+    </section>
+
+    <section class="sql-card">
+      <header>
+        <div>
+          <span class="eyebrow">已校验只读 SQL</span>
+          <el-tag v-if="result.risk?.level" size="small" effect="plain" :type="result.risk.level === 'LOW' ? 'success' : 'warning'">
+            {{ result.risk.level }} 风险
+          </el-tag>
+        </div>
+        <div>
+          <el-button size="small" text @click="copySql">复制</el-button>
+          <el-button size="small" text @click="sqlExpanded = !sqlExpanded">{{ sqlExpanded ? '收起' : '展开' }}</el-button>
+        </div>
+      </header>
+      <pre :class="{ expanded: sqlExpanded }">{{ sqlExpanded ? result.sql : sqlPreview }}</pre>
+    </section>
+
+    <div class="result-meta">
+      <span><strong>{{ displayRowCount }}</strong> 行</span>
+      <span><strong>{{ columns.length }}</strong> 列</span>
+      <span><strong>{{ result.elapsedMs ?? 0 }}</strong> ms</span>
+      <span v-if="result.truncated" class="warning-text">结果已按安全上限截断</span>
+      <span class="spacer" />
+      <span v-if="result.queryId" class="query-id">查询 #{{ result.queryId }}</span>
+      <el-button size="small" text :disabled="!result.queryId" @click="saveFavorite">收藏</el-button>
+      <el-tooltip :disabled="canExport" content="当前账户没有该数据源的导出权限" placement="top">
+        <span>
+          <el-button size="small" text :disabled="!canExport || !result.queryId || !hasRows" @click="exportExcel">
+            导出 Excel
+          </el-button>
+        </span>
+      </el-tooltip>
     </div>
 
     <div v-if="drillFilter" class="drill-banner">
-      <span>已选 <strong>{{ drillFilter.label }}</strong> · 表格已筛选，可继续追问明细</span>
-      <el-button size="small" type="primary" @click="confirmDrilldown">追问钻取</el-button>
+      <span>已筛选 {{ drillFilter.dimension }} = <strong>{{ drillFilter.label }}</strong></span>
+      <el-button size="small" type="primary" @click="confirmDrilldown">基于此项追问</el-button>
       <el-button size="small" text @click="clearDrill">清除</el-button>
     </div>
 
     <el-tabs v-model="activeTab" class="result-tabs">
-      <el-tab-pane label="图表" name="chart" :disabled="!hasRows">
-        <div class="chart-toolbar">
+      <el-tab-pane label="图表" name="chart" :disabled="!chartable">
+        <div v-if="chartable" class="chart-toolbar">
           <el-radio-group v-model="chartType" size="small">
             <el-radio-button value="bar">柱状图</el-radio-button>
             <el-radio-button value="line">折线图</el-radio-button>
             <el-radio-button value="pie">饼图</el-radio-button>
           </el-radio-group>
-          <span class="reason">{{ drillFilter ? '已钻取选中项，表格已同步筛选' : '点击图表元素可钻取查看明细' }}</span>
-          <span v-if="!drillFilter && recommended.reason" class="reason muted">{{ recommended.reason }}</span>
+          <span>{{ recommended.reason || '图表数值直接取自结果快照' }}</span>
         </div>
-        <Suspense v-if="hasRows">
+        <Suspense v-if="chartable">
           <ChartRenderer
             :type="chartType"
             :x-field="xField"
             :y-fields="yFields"
-            :rows="result.rows"
+            :series-field="recommended.seriesField"
+            :rows="rows"
             :highlight-index="drillFilter?.dataIndex ?? null"
             @drill="onChartDrill"
           />
-          <template #fallback>
-            <div class="chart-fallback">加载图表…</div>
-          </template>
+          <template #fallback><div class="chart-fallback">正在加载图表…</div></template>
         </Suspense>
+        <el-empty v-else description="该结果包含空值、非数值或高精度数字，仅提供无损表格展示" />
       </el-tab-pane>
 
-      <el-tab-pane label="表格" name="table">
-        <div class="table-toolbar">
-          <span class="table-summary">共 {{ displayRowCount }} 行 · {{ result.columns?.length || 0 }} 列</span>
-          <span v-if="result.truncated" class="table-truncated">（已截断，完整结果请导出 Excel）</span>
+      <el-tab-pane label="数据表" name="table">
+        <div class="table-wrap">
+          <el-table :data="displayRows" border stripe height="380" size="small" class="result-table">
+            <el-table-column
+              v-for="column in columns"
+              :key="column.name"
+              :prop="column.name"
+              :label="columnLabel(column)"
+              show-overflow-tooltip
+              :min-width="column.category === 'measure' ? 120 : 140"
+              sortable
+            >
+              <template #default="{ row }">
+                <span :class="{ 'number-cell': column.category === 'measure' }">{{ formatCell(row[column.name], column) }}</span>
+              </template>
+            </el-table-column>
+          </el-table>
         </div>
-        <el-table
-          :data="displayRows"
-          border
-          stripe
-          height="380"
-          size="small"
-          class="result-data-table"
-          :default-sort="{ prop: result.columns?.[0]?.name, order: 'ascending' }"
-        >
-          <el-table-column
-            v-for="col in result.columns"
-            :key="col.name"
-            :prop="col.name"
-            :label="columnLabel(col)"
-            show-overflow-tooltip
-            :min-width="col.category === 'measure' ? 100 : 120"
-            sortable
-          >
-            <template #default="{ row }">
-              <span :class="{ 'num-cell': col.category === 'measure' }">
-                {{ formatCell(row[col.name], col) }}
-              </span>
-            </template>
-          </el-table-column>
-        </el-table>
-      </el-tab-pane>
-
-      <el-tab-pane label="SQL" name="sql">
-        <pre class="sql-block expanded">{{ result.sql }}</pre>
       </el-tab-pane>
     </el-tabs>
   </div>
@@ -276,168 +217,159 @@ async function saveFavorite() {
 
 <style scoped>
 .result-panel {
-  margin-top: 4px;
+  min-width: 0;
 }
-.question-echo {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-  margin-bottom: 10px;
-  font-size: 13px;
-  color: #4b5563;
-}
-.question-echo .label {
-  flex-shrink: 0;
-  background: #eef2ff;
-  color: var(--brand-1);
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 12px;
-}
-.question-echo .text {
-  line-height: 1.5;
-}
-.explain {
-  margin-bottom: 10px;
-}
-.sql-preview {
-  margin-bottom: 10px;
-  border: 1px solid #e5e7eb;
+.insight-block {
+  margin-bottom: 12px;
+  padding: 14px 16px;
+  background: #eef7f4;
+  border: 1px solid #cfe5df;
+  border-left: 3px solid var(--accent);
   border-radius: 8px;
-  overflow: hidden;
-  background: #0f172a;
 }
-.sql-preview-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  background: #1e293b;
-  border-bottom: 1px solid #334155;
+.insight-text {
+  margin: 6px 0 0;
+  color: var(--ink-800);
+  font-size: 13px;
+  line-height: 1.7;
 }
-.sql-label {
-  color: #94a3b8;
-  font-size: 12px;
-  font-weight: 600;
-}
-.meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-.spacer {
-  flex: 1;
-}
-.preview-cards {
+.fact-grid {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 10px;
+  margin: 12px 0 0;
 }
-.preview-card {
-  flex: 1 1 140px;
-  min-width: 120px;
-  max-width: 200px;
-  background: #fff;
-  border: 1px solid #eef0f4;
-  border-radius: 8px;
+.fact-grid div {
+  min-width: 130px;
   padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid #d7e8e3;
+  border-radius: 6px;
 }
-.preview-cell {
-  display: flex;
-  justify-content: space-between;
-  gap: 6px;
-  font-size: 12px;
-  line-height: 1.6;
+.fact-grid dt {
+  color: var(--ink-500);
+  font-size: 10px;
 }
-.preview-cell .k {
-  color: #8a94a6;
+.fact-grid dd {
+  margin: 3px 0 0;
+  color: var(--ink-950);
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+.fact-grid small {
+  color: var(--ink-500);
+  font-size: 10px;
+  font-weight: 500;
+}
+.sql-card {
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  margin-bottom: 10px;
+  background: #172522;
+  border: 1px solid #30433f;
+  border-radius: 8px;
 }
-.preview-cell .v {
-  font-weight: 600;
-  color: #374151;
-  text-align: right;
-}
-.more-hint {
-  align-self: center;
-  font-size: 12px;
-  color: #8a94a6;
-}
-.chart-toolbar {
+.sql-card header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 8px;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px;
+  background: #20312e;
+  border-bottom: 1px solid #344844;
 }
-.reason {
-  color: #8a94a6;
-  font-size: 12px;
+.sql-card header > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
 }
-.reason.muted {
-  opacity: 0.85;
+.sql-card .eyebrow {
+  color: #96aaa5;
+}
+.sql-card :deep(.el-button) {
+  color: #c7d6d2;
+}
+.sql-card pre {
+  max-height: 4.7em;
+  overflow: hidden;
+  margin: 0;
+  padding: 11px 13px;
+  color: #dcebe7;
+  font: 12px/1.65 ui-monospace, SFMono-Regular, Consolas, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.sql-card pre.expanded {
+  max-height: 320px;
+  overflow: auto;
+}
+.result-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-height: 34px;
+  color: var(--ink-500);
+  font-size: 11px;
+}
+.result-meta strong {
+  color: var(--ink-800);
+  font-variant-numeric: tabular-nums;
+}
+.warning-text {
+  color: var(--warning);
+}
+.query-id {
+  font-family: ui-monospace, monospace;
 }
 .drill-banner {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 10px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  background: #eef2ff;
-  border: 1px solid #c7d2fe;
+  margin: 8px 0;
+  padding: 8px 11px;
+  color: var(--ink-800);
+  background: var(--accent-soft);
+  border: 1px solid #bbdbd5;
+  border-radius: 7px;
   font-size: 12px;
-  color: #4338ca;
+}
+.chart-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: var(--ink-500);
+  font-size: 11px;
 }
 .chart-fallback {
-  height: 200px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #8a94a6;
-  font-size: 13px;
-}
-.table-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
+  display: grid;
+  place-items: center;
+  height: 260px;
+  color: var(--ink-500);
   font-size: 12px;
-  color: #6b7280;
 }
-.table-summary {
-  font-weight: 600;
-  color: #374151;
-}
-.table-truncated {
-  color: #d97706;
-}
-.result-data-table :deep(.num-cell) {
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-}
-.sql-block {
-  margin: 0;
-  color: #e2e8f0;
-  padding: 10px 12px;
+.table-wrap {
+  max-width: 100%;
   overflow: hidden;
-  font-family: 'JetBrains Mono', Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.55;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 4.6em;
 }
-.sql-block.expanded {
-  max-height: none;
-  overflow: auto;
-  padding: 14px 16px;
-  font-size: 13px;
-  line-height: 1.6;
+.result-table :deep(.number-cell) {
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+@media (max-width: 640px) {
+  .result-meta .spacer,
+  .query-id {
+    display: none;
+  }
+  .sql-card header {
+    align-items: flex-start;
+  }
+  .chart-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 </style>

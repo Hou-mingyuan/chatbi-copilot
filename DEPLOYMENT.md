@@ -1,159 +1,199 @@
-# ChatBI Copilot · 部署说明
+# ChatBI Copilot 部署说明
 
-Docker Compose 一键演示与生产/预发部署要点。详细问数流程见 [docs/USAGE.md](docs/USAGE.md)。
+## 环境要求
 
-## 架构概览
-
-```
-Browser → frontend:80 (Nginx)
-              ↓ /api 反代
-         backend:8080 (Spring Boot)
-              ↓ JDBC read-only
-         目标业务库 (MySQL / PostgreSQL)
-              ↓
-         H2 卷 backend-data（元数据、历史、语义层）
-```
-
-可选 Demo：`mysql:3306` 容器 + 自动导入 `sample-data/mysql/`。
-
-## Project Hub Docker Profile
-
-在 monorepo 内通过 `ai-portfolio/docker` 启动（默认端口 **18182/18183**，避免与 standalone `ai-service-agent` 的 18082/18083 冲突）：
-
-```powershell
-cd ai-portfolio/docker
-docker compose -f docker-compose.profiles.yml --profile chatbi-copilot up -d --build
-curl http://localhost:18182/api/health
-```
-
-| 服务 | Hub 默认端口 |
+| 场景 | 要求 |
 | --- | --- |
-| 后端 API | **18182** |
-| 前端 UI | **18183** |
-| Demo MySQL | 13306 |
+| Windows | Windows 10/11、Docker Desktop、Compose v2 |
+| Linux | 64 位 Linux、Docker Engine、Compose v2 |
+| 原生源码 | JDK 17+、Maven 3.9+、Node.js 22+、npm 10+ |
+| 最低本地资源 | 2 vCPU、4 GiB 可用内存、5 GiB 可用磁盘 |
 
-验证：`.\verify-all.ps1 -Profile chatbi-copilot`
+首次构建需要访问 Docker 镜像仓库、Maven 仓库和 npm registry。默认宿主机端口为 `19030-19033`，本项目所有本地覆盖必须限制在 `19030-19039`。
 
-## 快速部署（演示）
+## 推荐路径：Docker Compose
 
 ```bash
 cp .env.example .env
-# 编辑 LLM_API_KEY
+docker compose config --quiet
 docker compose up -d --build
 ```
 
-| 服务 | 默认地址 | 说明 |
-| --- | --- | --- |
-| 前端 | http://localhost:8888 | 问数 UI |
-| 后端 | http://localhost:8080/api | REST API |
-| 健康检查 | http://localhost:8080/api/health | smoke / 负载均衡探活 |
-| Swagger | http://localhost:8080/api/swagger-ui.html | API 文档 |
-| Demo MySQL | localhost:13306 | 库 `chatbi_demo` |
+Compose 默认启动：
 
-端口冲突时在 `.env` 设置 `FRONTEND_HOST_PORT`、`BACKEND_HOST_PORT`、`MYSQL_HOST_PORT`。
+| 服务 | 宿主机端口 | 容器端口 |
+| --- | ---: | ---: |
+| backend | `19030` | `8080` |
+| frontend | `19031` | `80` |
+| MySQL demo | `19032` | `3306` |
+| PostgreSQL demo | `19033` | `5432` |
 
-## 演示账号与示例数据
+宿主机端口仅使用 `19030-19039`。frontend 通过内部网络把 `/api` 反向代理到 backend。
 
-Docker 默认启用 Demo 数据源（`DEMO_DATASOURCE_ENABLED=true`）。**仅供本地演示，勿用于生产。**
-
-| 项 | 默认值 |
-| --- | --- |
-| 主机 | `localhost`（容器内为 `mysql`） |
-| 端口 | `13306`（映射容器 3306） |
-| 数据库 | `chatbi_demo` |
-| 用户名 | `chatbi` |
-| 密码 | `chatbi123` |
-| Root 密码 | `root123` |
-
-应用内会自动注册数据源 **Demo - Sales (MySQL)**（`datasourceId=1`）。示例问句见 [README.md](README.md#-快速开始)。
-
-无 LLM Key 时仍可用 smoke SQL（不调用模型）：
+等待就绪并验收：
 
 ```bash
-curl http://localhost:8080/api/health
-curl -X POST http://localhost:8080/api/query/run \
-  -H "Content-Type: application/json" \
-  -d "{\"datasourceId\":1,\"sql\":\"select p.category, count(*) as cnt from products p group by p.category limit 10\"}"
+docker compose ps
+curl --fail http://127.0.0.1:19030/api/health/ready
+node scripts/smoke-mock-demo.mjs http://127.0.0.1:19030
+curl --fail http://127.0.0.1:19031/ > /dev/null
 ```
 
-（表名以 `sample-data/mysql/01_schema.sql` 为准；若报错请先 `GET /api/datasources` 确认 id。）
+`smoke-mock-demo.mjs` 会真实登录并依次检查 MySQL 和 PostgreSQL 两个已核验只读数据源。每个库都会执行自然语言问数和手写只读 SQL，断言 `20 / 185551.00` 及五大区 `7 / 6 / 3 / 2 / 2`，并复核图表字段、数据解读、历史快照恢复、收藏幂等、XLSX 响应和收藏删除。任一数据库缺失、可写、错数或闭环不一致都会非零退出。
 
-## 环境变量（生产）
+全新卷在较慢磁盘上初始化 MySQL 可能需要数分钟；Compose 为首次初始化保留 240 秒健康宽限，smoke 默认最多等待 6 分钟。`scripts/demo-mock.ps1` 与 `scripts/demo-mock.sh` 会使用 `docker compose up -d --build --wait` 后再验收。
 
-| 变量 | 说明 |
-| --- | --- |
-| `LLM_*` | 见 `.env.example` |
-| `CHATBI_SECRET` | 数据源密码加密密钥，**生产必改** |
-| `DEMO_DATASOURCE_ENABLED` | 生产设为 `false` |
-| `SPRING_PROFILES_ACTIVE` | 镜像内 docker profile 已启用 |
+停止：
 
-后端完整配置：`backend/src/main/resources/application.yml`（支持环境变量覆盖）。
+```bash
+docker compose down
+```
 
-## 生产部署建议
+删除本地演示数据：
 
-### 1. 拆分 Demo 与真实库
+```bash
+docker compose down -v
+```
 
-- 生产 compose **移除 `mysql` 服务**或独立网络。
-- 通过 UI 或 API 注册真实只读数据源；关闭 Demo 自动注册。
+`down -v` 会永久删除本地 Compose 卷，仅在明确需要重置演示数据时使用。
 
-### 2. 持久化
+## 容器启动顺序
+
+```text
+MySQL healthy ─┐
+               ├─> backend ready ─> frontend
+Postgres healthy┘
+```
+
+backend readiness 会检查 H2 元数据库可查询；两个 Demo 数据源在应用初始化时分别执行数据库侧只读授权核验。核验失败时数据源不会变为可查询状态。
+
+## 零密钥与真实模型
+
+`.env.example` 默认：
+
+```dotenv
+LLM_PROVIDER=mock
+LLM_MODEL=mock
+LLM_API_KEY=
+```
+
+该模式适合开箱演示和 CI，不代表真实模型效果。接入 Responses API：
+
+```dotenv
+LLM_PROVIDER=<provider>
+LLM_BASE_URL=https://example.com/v1
+LLM_MODEL=<model>
+LLM_API_KEY=<secret>
+LLM_API_STYLE=responses
+LLM_REASONING_EFFORT=none
+LLM_TIMEOUT_SECONDS=60
+```
+
+Chat Completions 兼容接口使用 `LLM_API_STYLE=chat-completions`。修改后重建或重启 backend：
+
+```bash
+docker compose up -d --build backend
+```
+
+## 持久化
 
 | 卷 | 内容 |
 | --- | --- |
-| `backend-data` | H2 元库（数据源配置、历史、收藏、语义层） |
-| `mysql-data` | 仅 Demo 需要 |
+| `backend-data` | H2 元数据、用户、ACL、语义、查询任务、快照、收藏和审计 |
+| `mysql-data` | MySQL 演示业务数据 |
+| `postgres-data` | PostgreSQL 演示业务数据 |
 
-定期备份 `backend-data`；恢复后 `CHATBI_SECRET` 须与备份时一致，否则已存密码无法解密。
+备份 `backend-data` 时必须同时保留对应 `CHATBI_SECRET`；否则已加密的数据源密码无法解密。H2 文件库只适合单 backend 实例。
 
-### 3. 反向代理
+## 生产配置
 
-前端 `nginx.conf` 已将 `/api` 代理到 backend。生产在更外层终止 TLS，例如：
+本仓库 Compose 是本地演示基线。生产至少覆盖：
 
-```nginx
-location / {
-  proxy_pass http://chatbi-frontend:80;
-}
+```dotenv
+CHATBI_PRODUCTION_MODE=true
+CHATBI_SECRET=<random-secret-from-secret-manager>
+CHATBI_COOKIE_SECURE=true
+CHATBI_ALLOWED_ORIGINS=https://bi.example.com
+DEMO_AUTH_ENABLED=false
+DEMO_DATASOURCE_ENABLED=false
+DEMO_PG_ENABLED=false
+LLM_API_KEY=<secret-from-secret-manager>
 ```
 
-### 4. 健康检查与重启
+生产启动闸门会拒绝默认加密密钥、演示认证、非 Secure Cookie 或通配 CORS。
+
+还应：
+
+- 在 HTTPS 反向代理后提供 frontend；不把 backend 和数据库端口暴露公网。
+- 将 H2 换成适合单实例的受管卷，或在多实例前迁移到共享元数据库。
+- 为每个目标库创建独立只读账号并通过 UI 核验。
+- 使用外部 Secret Manager 注入 LLM 和数据库凭据。
+- 备份元数据库并验证恢复；采集 backend 审计和错误日志。
+- 根据实际数据量调整扫描确认、硬阻断、LIMIT、超时和并发预算。
+
+## 原生源码运行
+
+先确认 `java -version`、`mvn -version`、`node --version`、`npm --version` 和 `docker compose version` 满足上方要求。以下命令在 Linux shell 与 Windows `cmd.exe` 均可执行。
+
+目标数据库仍可由 Compose 提供：
 
 ```bash
-curl -sf http://localhost:8080/api/health
-docker compose ps
-docker compose logs -f backend
+docker compose up -d --wait mysql postgres
 ```
 
-`docker-compose.yml` 中 MySQL 已配置 `healthcheck`；backend `depends_on` 等待 MySQL 就绪。
-
-### 5. 资源建议（起步）
-
-| 组件 | CPU | 内存 |
-| --- | --- | --- |
-| backend | 1–2 核 | 1–2 GiB |
-| frontend | 0.25 核 | 128 MiB |
-| Demo mysql | 0.5 核 | 512 MiB |
-
-LLM 调用为外部 HTTP；并发问数主要消耗后端线程与 LLM 配额。
-
-## 本地开发部署
-
-见 [README.md](README.md#方式二本地开发)。后端 `mvn -s settings.xml spring-boot:run`，前端 `npm run dev`（代理 8080）。
-
-## 升级与回滚
+后端：
 
 ```bash
-git pull
-docker compose up -d --build
+cd backend
+mvn -s settings.xml spring-boot:run
 ```
 
-回滚：检出上一版本 tag 后重新 build。H2 卷向前兼容由 changelog 保证；重大升级前备份 `backend-data`。
+默认 backend 使用 `19030`，H2 文件为 `backend/data/chatbi.mv.db`。要注册宿主机演示库，设置：
 
-## 压测与性能基线
+```dotenv
+DEMO_DATASOURCE_ENABLED=true
+DEMO_DB_HOST=127.0.0.1
+DEMO_DB_PORT=19032
+DEMO_PG_ENABLED=true
+DEMO_PG_HOST=127.0.0.1
+DEMO_PG_PORT=19033
+```
 
-见 [docs/PERFORMANCE.md](docs/PERFORMANCE.md)（health + `/api/query/run` smoke，**不消耗 LLM**）。
+前端：
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+Vite 固定使用 `127.0.0.1:19031`，并代理到 `127.0.0.1:19030`。
+
+## 升级
+
+1. 备份元数据库卷和 `CHATBI_SECRET`。
+2. 运行后端、前端、真实双库和 Compose smoke 门槛。
+3. 构建新镜像并启动；Flyway 会在 backend 启动时验证并迁移元数据库。
+4. 检查 `/api/health/ready`、登录、数据源只读状态和一条固定问数。
+
+不要在未知的新迁移已写入后直接使用旧镜像回滚。需要回滚时先按备份恢复兼容的元数据库。
+
+## 故障排查
+
+| 现象 | 检查 |
+| --- | --- |
+| backend 不 ready | `docker compose logs backend`；检查 H2 卷、生产启动闸门和端口 |
+| 数据源不可查询 | 打开“数据源”查看只读核验证据；检查只读用户 grant 与网络 |
+| 登录 401 | 检查账号是否启用、Cookie 域/HTTPS 和会话是否过期 |
+| 写请求 403 | 检查 CSRF 请求头；若为业务动作，再检查角色和数据源能力 |
+| 查询需确认 | 查看 EXPLAIN 风险原因；确认后会创建新任务执行 |
+| 查询超时/取消 | 查看查询任务和审计；数据库 Statement 会被取消 |
+| 真实 LLM 失败 | 检查 base URL、API style、模型名、配额和 60 秒供应商超时 |
+| Docker build 拉取失败 | 检查 Docker Hub 网络；不得用旧缓存镜像代替当前源码验收 |
 
 ## 相关文档
 
-- [SECURITY.md](SECURITY.md) — 安全与上线清单
-- [docs/USAGE.md](docs/USAGE.md) — 使用教程
-- [docs/architecture.md](docs/architecture.md) — 架构详图
+- [README](README.md)
+- [安全说明](SECURITY.md)
+- [使用指南](docs/USAGE.md)
+- [性能说明](docs/PERFORMANCE.md)

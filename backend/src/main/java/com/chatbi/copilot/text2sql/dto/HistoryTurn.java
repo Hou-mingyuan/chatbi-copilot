@@ -6,4 +6,5 @@ import lombok.Data;
 public class HistoryTurn {
     private String question;
     private String sql;
+    private String clarification;
 }

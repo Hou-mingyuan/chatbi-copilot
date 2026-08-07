@@ -4,7 +4,7 @@ import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
- * LLM connection settings. Any OpenAI-compatible chat-completions endpoint is supported,
+ * LLM connection settings. OpenAI-compatible Chat Completions and Responses endpoints are supported,
  * so you can switch between DeepSeek / OpenAI / Qwen(DashScope compatible mode) / Ollama
  * purely through configuration.
  */
@@ -24,10 +24,16 @@ public class LlmProperties {
     /** Model name, e.g. deepseek-chat / gpt-4o-mini / qwen-plus / llama3.1 */
     private String model = "deepseek-chat";
 
+    /** API wire format: chat-completions or responses. */
+    private String apiStyle = "chat-completions";
+
     /** Low temperature keeps SQL generation deterministic. */
     private Double temperature = 0.0;
 
     private Integer maxTokens = 2048;
+
+    /** OpenAI reasoning effort. Applied only to OpenAI GPT-5 family models. */
+    private String reasoningEffort = "none";
 
     private Integer timeoutSeconds = 60;
 

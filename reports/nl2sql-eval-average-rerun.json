@@ -1,0 +1,94 @@
+{
+  "datasetVersion": "1.0.0",
+  "startedAt": "2026-07-20T01:47:09.490Z",
+  "finishedAt": "2026-07-20T01:47:26.992Z",
+  "provider": "volcengine",
+  "model": "glm-5.2",
+  "scoring": "executed-result-equivalence",
+  "thresholds": {
+    "modelSuccessRate": 0.9,
+    "clarificationRate": 1,
+    "safetyInterceptionRate": 1
+  },
+  "gates": {
+    "modelSuccessRate": true,
+    "clarificationRate": true,
+    "safetyInterceptionRate": true
+  },
+  "summary": {
+    "total": 2,
+    "passed": 2,
+    "model": {
+      "total": 2,
+      "passed": 2,
+      "successRate": 1
+    },
+    "policy": {
+      "total": 0,
+      "passed": 0
+    },
+    "clarification": {
+      "total": 0,
+      "passed": 0,
+      "rate": 1
+    },
+    "safetyInterception": {
+      "total": 0,
+      "passed": 0,
+      "rate": 1
+    },
+    "failureClassification": {}
+  },
+  "results": [
+    {
+      "id": "average-paid-order-value",
+      "layer": "model",
+      "category": "single-table-aggregate",
+      "dialect": "mysql",
+      "datasourceId": 1,
+      "question": "2024年已支付订单的平均客单价是多少？",
+      "passed": true,
+      "status": "SUCCEEDED",
+      "generatedSql": "SELECT ROUND(AVG(o.total_amount), 2) AS avg_order_value FROM orders o WHERE o.status = 'paid' AND YEAR(o.order_date) = 2024 LIMIT 500",
+      "queryId": 679,
+      "expectedRows": [
+        "n:9277.5500000000"
+      ],
+      "actualRows": [
+        "n:9277.5500000000"
+      ],
+      "resultHashEvidence": {
+        "generatedQueryId": 679,
+        "generatedRowCount": 1,
+        "referenceQueryId": 680,
+        "referenceRowCount": 1
+      },
+      "elapsedMs": 7469
+    },
+    {
+      "id": "average-paid-order-value",
+      "layer": "model",
+      "category": "single-table-aggregate",
+      "dialect": "postgresql",
+      "datasourceId": 2,
+      "question": "2024年已支付订单的平均客单价是多少？",
+      "passed": true,
+      "status": "SUCCEEDED",
+      "generatedSql": "SELECT AVG(o.total_amount) AS avg_order_value, COUNT(*) AS paid_order_count, SUM(o.total_amount) AS total_revenue FROM orders o WHERE o.status = 'paid' AND o.order_date >= DATE '2024-01-01' AND o.order_date < DATE '2025-01-01' LIMIT 500",
+      "queryId": 681,
+      "expectedRows": [
+        "n:9277.5500000000"
+      ],
+      "actualRows": [
+        "n:185551.00000000|n:20.000000000000|n:9277.5500000000"
+      ],
+      "resultHashEvidence": {
+        "generatedQueryId": 681,
+        "generatedRowCount": 1,
+        "referenceQueryId": 682,
+        "referenceRowCount": 1
+      },
+      "elapsedMs": 10026
+    }
+  ]
+}

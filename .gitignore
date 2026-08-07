@@ -14,6 +14,9 @@ frontend/.vite/
 npm-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+__pycache__/
+*.py[cod]
+.playwright-cli/
 
 # ---- Secrets / env ----
 .env

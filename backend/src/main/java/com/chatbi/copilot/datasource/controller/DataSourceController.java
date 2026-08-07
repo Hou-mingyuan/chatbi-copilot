@@ -4,6 +4,7 @@ import com.chatbi.copilot.common.ApiResponse;
 import com.chatbi.copilot.datasource.dto.DataSourceReq;
 import com.chatbi.copilot.datasource.dto.DataSourceVo;
 import com.chatbi.copilot.datasource.dto.SchemaInfo;
+import com.chatbi.copilot.datasource.dto.ConnectionTestResult;
 import com.chatbi.copilot.datasource.service.DataSourceService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -17,6 +18,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 import java.util.List;
 
@@ -45,18 +47,21 @@ public class DataSourceController {
 
     @Operation(summary = "Create a datasource")
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<DataSourceVo> create(@Valid @RequestBody DataSourceReq req) {
         return ApiResponse.ok(service.create(req));
     }
 
     @Operation(summary = "Update a datasource")
     @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<DataSourceVo> update(@PathVariable Long id, @Valid @RequestBody DataSourceReq req) {
         return ApiResponse.ok(service.update(id, req));
     }
 
     @Operation(summary = "Delete a datasource")
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<Void> delete(@PathVariable Long id) {
         service.delete(id);
         return ApiResponse.ok();
@@ -64,16 +69,16 @@ public class DataSourceController {
 
     @Operation(summary = "Test an unsaved connection")
     @PostMapping("/test")
-    public ApiResponse<Void> test(@Valid @RequestBody DataSourceReq req) {
-        service.testConnection(req);
-        return ApiResponse.ok();
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<ConnectionTestResult> test(@Valid @RequestBody DataSourceReq req) {
+        return ApiResponse.ok(service.testConnection(req));
     }
 
     @Operation(summary = "Test a saved connection")
     @PostMapping("/{id}/test")
-    public ApiResponse<Void> testById(@PathVariable Long id) {
-        service.testConnectionById(id);
-        return ApiResponse.ok();
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<ConnectionTestResult> testById(@PathVariable Long id) {
+        return ApiResponse.ok(service.testConnectionById(id));
     }
 
     @Operation(summary = "Get schema (tables/columns/comments) enriched with the semantic layer")

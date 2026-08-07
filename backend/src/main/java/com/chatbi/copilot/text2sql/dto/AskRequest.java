@@ -2,10 +2,8 @@ package com.chatbi.copilot.text2sql.dto;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
-
-import java.util.ArrayList;
-import java.util.List;
 
 @Data
 public class AskRequest {
@@ -14,11 +12,14 @@ public class AskRequest {
     private Long datasourceId;
 
     @NotBlank(message = "question is required")
+    @Size(max = 1000, message = "question is too long")
     private String question;
-
-    /** Prior turns for multi-turn follow-ups (optional). */
-    private List<HistoryTurn> history = new ArrayList<>();
 
     /** If true, only generate SQL and skip execution (dry run). */
     private boolean previewOnly = false;
+
+    @Size(max = 36, message = "sessionId is invalid")
+    private String sessionId;
+
+    private boolean confirmRisk;
 }

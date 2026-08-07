@@ -1,58 +1,102 @@
 services:
   mysql:
     image: mysql:8.0
-    container_name: chatbi-mysql
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root123}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-chatbi_demo}
-      MYSQL_USER: ${MYSQL_USER:-chatbi}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-chatbi123}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-LocalDemoRoot!2026}
+      MYSQL_DATABASE: chatbi_demo
     ports:
-      # Default 13306 avoids conflict with local MySQL on Windows/macOS (3306 often in use).
-      - "${MYSQL_HOST_PORT:-13306}:3306"
+      - "${MYSQL_HOST_PORT:-19032}:3306"
     volumes:
-      # Auto-loads schema + seed on first start (executed in filename order)
       - ./sample-data/mysql:/docker-entrypoint-initdb.d:ro
       - mysql-data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD:-root123}"]
-      interval: 10s
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD:-LocalDemoRoot!2026}"]
+      interval: 5s
       timeout: 5s
-      retries: 12
+      retries: 24
+      start_period: 240s
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: chatbi_demo
+      POSTGRES_USER: chatbi_admin
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:-LocalDemoPgAdmin!2026}
+    ports:
+      - "${POSTGRES_HOST_PORT:-19033}:5432"
+    volumes:
+      - ./sample-data/postgresql:/docker-entrypoint-initdb.d:ro
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chatbi_admin -d chatbi_demo"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 10s
+    restart: unless-stopped
 
   backend:
     build: ./backend
-    container_name: chatbi-backend
     environment:
+      SERVER_PORT: "8080"
       SPRING_PROFILES_ACTIVE: docker
       LLM_PROVIDER: ${LLM_PROVIDER:-mock}
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       LLM_MODEL: ${LLM_MODEL:-mock}
       LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_API_STYLE: ${LLM_API_STYLE:-chat-completions}
       LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.0}
-      CHATBI_SECRET: ${CHATBI_SECRET:-chatbi-copilot-dev-secret-change-me}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-2048}
+      LLM_REASONING_EFFORT: ${LLM_REASONING_EFFORT:-none}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-60}
+      CHATBI_SECRET: ${CHATBI_SECRET:-local-demo-encryption-key-change-in-production}
+      CHATBI_PRODUCTION_MODE: "false"
+      CHATBI_COOKIE_SECURE: "false"
+      CHATBI_ALLOWED_ORIGINS: http://localhost:${FRONTEND_HOST_PORT:-19031},http://127.0.0.1:${FRONTEND_HOST_PORT:-19031}
+      DEMO_AUTH_ENABLED: "true"
+      DEMO_ADMIN_PASSWORD: ${DEMO_ADMIN_PASSWORD:-ChatBI!Admin123}
+      DEMO_ANALYST_PASSWORD: ${DEMO_ANALYST_PASSWORD:-ChatBI!Analyst123}
+      DEMO_VIEWER_PASSWORD: ${DEMO_VIEWER_PASSWORD:-ChatBI!Viewer123}
       DEMO_DATASOURCE_ENABLED: "true"
       DEMO_DB_HOST: mysql
       DEMO_DB_PORT: "3306"
-      DEMO_DB_NAME: ${MYSQL_DATABASE:-chatbi_demo}
-      DEMO_DB_USER: ${MYSQL_USER:-chatbi}
-      DEMO_DB_PASSWORD: ${MYSQL_PASSWORD:-chatbi123}
+      DEMO_DB_NAME: chatbi_demo
+      DEMO_DB_USER: chatbi_ro
+      DEMO_DB_PASSWORD: ${DEMO_READONLY_PASSWORD:-ChatBI!Readonly123}
+      DEMO_PG_ENABLED: "true"
+      DEMO_PG_HOST: postgres
+      DEMO_PG_PORT: "5432"
+      DEMO_PG_DB_NAME: chatbi_demo
+      DEMO_PG_USER: chatbi_ro
+      DEMO_PG_PASSWORD: ${DEMO_READONLY_PASSWORD:-ChatBI!Readonly123}
     ports:
-      - "${BACKEND_HOST_PORT:-8080}:8080"
+      - "${BACKEND_HOST_PORT:-19030}:8080"
     volumes:
       - backend-data:/app/data
     depends_on:
       mysql:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8080/api/health/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 30s
+    restart: unless-stopped
 
   frontend:
     build: ./frontend
-    container_name: chatbi-frontend
     ports:
-      - "${FRONTEND_HOST_PORT:-8888}:80"
+      - "${FRONTEND_HOST_PORT:-19031}:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   mysql-data:
+  postgres-data:
   backend-data:

@@ -1,210 +1,182 @@
-# 使用指南 · Docker 问数流程
+# ChatBI Copilot 使用指南
 
-本文档说明如何用 Docker Compose 一键启动 ChatBI Copilot，并完成从配置 LLM 到自然语言问数的完整流程。
+## 启动与登录
 
-## 前置条件
-
-- 已安装 [Docker Desktop](https://www.docker.com/products/docker-desktop/)（含 Docker Compose）
-- 拥有一个 OpenAI 兼容的 LLM API Key（推荐 DeepSeek，也可换 OpenAI / 通义 / 本地 Ollama）
-- 本机端口 **13306**、**8080**、**8888** 未被占用；如被占用，可用 `.env` 中的 `MYSQL_HOST_PORT`、`BACKEND_HOST_PORT`、`FRONTEND_HOST_PORT` 覆盖
-
-## 第一步：准备环境变量
-
-在项目根目录执行：
+推荐先运行零密钥 Compose：
 
 ```bash
-cd chatbi-copilot
 cp .env.example .env
-```
-
-编辑 `.env`，至少填入你的 LLM Key：
-
-```env
-LLM_API_KEY=sk-your-real-key-here
-```
-
-其他常用配置（可选）：
-
-| 变量 | 说明 | 默认 |
-| --- | --- | --- |
-| `LLM_PROVIDER` | 供应商标识（展示用） | `deepseek` |
-| `LLM_BASE_URL` | OpenAI 兼容 base url | `https://api.deepseek.com/v1` |
-| `LLM_MODEL` | 模型名 | `deepseek-chat` |
-| `LLM_TEMPERATURE` | 采样温度，SQL 生成建议 0 | `0.0` |
-| `MYSQL_HOST_PORT` | 示例 MySQL 暴露到宿主机的端口 | `13306` |
-| `BACKEND_HOST_PORT` | 后端 API 暴露到宿主机的端口 | `8080` |
-| `FRONTEND_HOST_PORT` | 前端页面暴露到宿主机的端口 | `8888` |
-
-> **注意**：`.env` 含敏感信息，请勿提交到 Git。
-
-## 第二步：一键启动
-
-```bash
 docker compose up -d --build
+node scripts/smoke-mock-demo.mjs http://127.0.0.1:19030
 ```
 
-首次启动会：
+打开 [http://127.0.0.1:19031](http://127.0.0.1:19031)。
 
-1. 构建并启动 **MySQL 8** 容器，自动导入 `sample-data/mysql/` 建表与种子数据
-2. 构建并启动 **后端**（Spring Boot），自动注册指向示例库的 Demo 数据源
-3. 构建并启动 **前端**（Nginx 托管 Vue 静态资源）
+| 账号 | 演示密码 | 用途 |
+| --- | --- | --- |
+| `admin` | `ChatBI!Admin123` | 配置用户、权限、数据源和审计 |
+| `analyst` | `ChatBI!Analyst123` | 问数、导出和维护语义定义 |
+| `viewer` | `ChatBI!Viewer123` | 验证受限查询体验 |
 
-查看启动状态：
+登录状态由安全 Cookie 保存，退出后旧 Cookie 立即失效。连续登录失败会触发限速。
 
-```bash
-docker compose ps
-docker compose logs -f backend   # 后端就绪后可 Ctrl+C 退出
+## 智能问数
+
+1. 在顶部选择 `Demo - Sales (MySQL)` 或 `Demo - Sales (PostgreSQL)`。
+2. 输入明确的指标、维度和时间范围。
+3. 发送后查看真实任务阶段；可在执行过程中取消。
+4. 任务成功后查看数据解读、只读 SQL、风险、耗时、图表和表格。
+
+推荐问题：
+
+- `2024年已支付订单一共有多少单，销售额合计多少元？`
+- `2024年各月已支付订单销售额趋势是什么？`
+- `2024年各大区的已支付订单销售额分别是多少？`
+- `请给出2024年已支付成交件数最高的5个产品名称和成交件数。`
+- `2024年线上渠道已支付订单的平均客单价是多少？`
+
+### 澄清
+
+缺少关键口径时，系统不会执行 SQL。例如：
+
+```text
+用户：最近销售怎么样？
+系统：请补充时间范围、指标或分析维度。
 ```
 
-## 第三步：打开应用
+在原输入框补充答案即可；澄清内容保存在当前服务端会话中。
 
-| 入口 | 地址 |
+### 多轮上下文
+
+```text
+用户：2024年各大区的已支付订单数是多少？
+用户：只保留华东这一行，保持上一轮的指标和大区维度。
+```
+
+上下文只来自同一用户、同一数据源、同一会话。切换数据源或点击“新对话”不会串用旧上下文。
+
+### 风险确认
+
+后端会在执行前运行 EXPLAIN：
+
+- LOW 风险直接执行；
+- 达到确认阈值返回扫描原因和预计行数，用户确认后才执行；
+- 超过硬预算直接阻断。
+
+确认会创建新任务，原预览任务仍保留在审计中。
+
+### 取消与重试
+
+- “取消”会终止任务和当前 JDBC Statement。
+- 失败、取消和总超时任务可重试。
+- 重试不会把错误任务改写成成功，而是创建可追踪的新任务。
+
+## 结果与图表
+
+- 数据解读由后端根据结果快照确定性生成，不再调用模型改写数字。
+- SQL 卡片可展开或复制。
+- 系统推荐柱状图、折线图、饼图或表格，也可手动切换适用图形。
+- 点击图表项会在同一快照上筛选表格，并可基于该项继续追问。
+- 空值、非法数字和超过浏览器安全精度的数值不会被转成 0；不适合图表时只显示无损表格。
+
+页面表格、图表无障碍文本、数据解读和 Excel 均引用同一 `queryId` 快照。历史恢复前会重新核对 SHA-256。
+
+## 历史、收藏和 Excel
+
+### 查询历史
+
+- 仅显示当前用户记录。
+- 成功记录可恢复原始结果快照、复制 SQL或重新执行。
+- 失败、澄清、取消、超时和待确认状态也会保留。
+- 删除单条或清空当前数据源历史前会确认。
+
+### 收藏
+
+- 收藏只接受本人成功查询的 `queryId`，客户端不能自行提交替代 SQL。
+- 收藏详情恢复原始结果；“重新执行”仍会经过当前权限、SQL 护栏和风险检查。
+
+### Excel 导出
+
+- 只有当前仍具备该数据源 EXPORT 权限的用户可以导出。
+- VIEWER 的导出按钮在界面中禁用，直接调用 API 仍会返回 HTTP 403。
+- 导出不会重跑 SQL；文件来自结果快照。
+- 高精度整数按文本保真，公式样式文本会被中和。
+
+## 数据源管理
+
+只有 ADMIN 可新增、编辑、删除或重新核验数据源。普通用户只能查看自己可访问数据源的权限裁剪 Schema。
+
+新建数据源时：
+
+1. 选择 MySQL 或 PostgreSQL。
+2. 填写主机、端口、数据库、独立只读用户名和密码。
+3. JDBC 参数只允许服务端白名单内的安全项。
+4. 保存前执行数据库侧授权核验。
+
+MySQL 核验只接受 USAGE / SELECT / SHOW VIEW；PostgreSQL 会检查高权角色、数据库 CREATE、可写表和可写 Schema。未通过核验的数据源不能执行查询。
+
+## 语义层
+
+支持：
+
+| 类型 | 用途 |
 | --- | --- |
-| **前端（问数界面）** | http://localhost:8888 |
-| **后端健康检查** | http://localhost:8080/api/health |
-| **Swagger API 文档** | http://localhost:8080/api/swagger-ui.html |
-| **H2 控制台（元数据）** | http://localhost:8080/api/h2-console |
+| TABLE | 表业务别名和口径 |
+| COLUMN | 字段业务含义 |
+| METRIC | 指标名称、表达式、聚合和单位 |
+| ENUM | 数据库存值与业务标签 |
+| TIME | 时间字段与默认粒度 |
+| JOIN | 已验证的表关联端点与 JOIN 类型 |
 
-若使用自定义端口，例如：
+语义写入会检查真实表、列、时间类型和 JOIN 两端；指标表达式也经过 AST 护栏。每次创建、更新或删除都会生成版本快照。
 
-```env
-FRONTEND_HOST_PORT=18888
-BACKEND_HOST_PORT=18084
-MYSQL_HOST_PORT=13316
-```
+“Prompt 预览”展示当前问题实际命中的有限 Schema 和语义定义，不会显示无权限表或敏感列。
 
-则前端改为 `http://localhost:18888`，健康检查改为 `http://localhost:18084/api/health`。
+## 用户、权限与审计
 
-## 第四步：确认 LLM 已配置
+ADMIN 在“权限与审计”中：
 
-1. 打开前端 http://localhost:8888
-2. 顶部应显示当前数据源为 **Demo - Sales (MySQL)**
-3. 若 LLM Key 未配置，问数页会提示「请先配置 LLM」——检查 `.env` 中 `LLM_API_KEY` 后执行：
+- 创建、启停用户并分配角色；
+- 为用户配置 QUERY、EXPORT、MANAGE_SEMANTIC；
+- 配置可访问表和敏感列例外；
+- 标记数据源敏感列；
+- 按动作、用户、资源和结果查看审计事件。
 
-```bash
-docker compose up -d --force-recreate backend
-```
+权限修改立即影响新请求。历史记录不会形成永久导出授权。
 
-也可调用 API 检查：
+## 页面状态
 
-```bash
-curl http://localhost:8080/api/llm/status
-```
+- 网络断开时显示全局离线提示，并禁用问数提交。
+- 数据源、语义、历史、收藏和管理页面均有 loading、empty、error/retry 状态。
+- API 错误会显示 HTTP 状态和请求 ID，便于在审计/日志中定位。
+- `375×812` 使用底部导航；`768×1024` 和 `1440×900` 使用紧凑工作台布局。
 
-没有真实 LLM Key 时，仍可用 Docker smoke 验证应用、Demo 数据源与 SQL 护栏：
-
-```bash
-curl http://localhost:8080/api/health
-curl http://localhost:8080/api/datasources
-curl -X POST http://localhost:8080/api/query/run ^
-  -H "Content-Type: application/json" ^
-  -d "{\"datasourceId\":1,\"sql\":\"select category, sum(amount) as total_amount from sales_orders group by category order by total_amount desc\"}"
-```
-
-自然语言问数 `/api/query/ask` 需要真实 LLM Key；`/api/query/run` 不调用 LLM，可用于本地和 CI smoke。
-
-## 第五步：开始问数
-
-在首页输入框中用自然语言提问，例如：
-
-- `各产品类目的销售额占比`
-- `2024年每月销售额趋势`
-- `销售额最高的5个产品`
-- `各大区的客户数量`
-
-系统会依次：
-
-1. 读取当前数据源的表结构与字段注释
-2. 叠加语义层配置（如有）
-3. 调用 LLM 生成 SQL
-4. 经 **SqlGuard** 只读护栏校验（仅 SELECT + LIMIT）
-5. 在示例库执行并返回结果
-6. 自动推荐柱状/折线/饼图，可手动切换
-
-### 多轮追问
-
-在同一会话中继续输入，例如：
-
-- 第一问：`2024年每月销售额趋势`
-- 追问：`只看华东大区`
-- 追问：`改成按季度汇总`
-
-历史上下文会自动带入，无需重复描述。
-
-## 第六步：其他常用功能
-
-### 数据源管理
-
-路径：**数据源** 菜单
-
-- 查看 Demo 数据源连接信息
-- 新增自己的 MySQL / PostgreSQL 业务库
-- 点击「测试连接」验证后再问数
-
-### 语义层
-
-路径：**语义层** 菜单
-
-为表/字段添加业务别名，例如：
-
-| 表 | 字段 | 业务别名 | 描述 |
-| --- | --- | --- | --- |
-| orders | status | 订单状态 | paid=已支付, cancelled=已取消 |
-
-配置后 LLM 更容易理解业务口径。
-
-### 查询历史与收藏
-
-- **历史**：查看过往问数记录，支持重跑
-- **收藏**：保存常用问句，一键再次提问
-
-### 导出 Excel
-
-问数结果页点击「导出 Excel」，下载当前表格数据。
-
-## 停止与清理
+## 自动化验收
 
 ```bash
-# 停止服务（保留数据卷）
-docker compose down
+# 零密钥完整链路
+node scripts/smoke-mock-demo.mjs http://127.0.0.1:19030
 
-# 停止并删除 MySQL / 元数据卷（彻底重置）
-docker compose down -v
+# 真实模型固定集（Mock 会被 runner 拒绝）
+node scripts/evaluate-nl2sql.mjs \
+  --base-url http://127.0.0.1:19030/api \
+  --dataset eval/nl2sql-eval-v1.json \
+  --output reports/nl2sql-eval-real.json
+
+# 认证态本地性能
+python loadtest/dry_run.py \
+  --base-url http://127.0.0.1:19030/api \
+  --iterations 15 --concurrency 3
 ```
 
 ## 常见问题
 
-### 问数报错「LLM 未配置」
-
-确认 `.env` 中 `LLM_API_KEY` 已填写，并重建 backend 容器。
-
-### 问数报错「SQL 被安全护栏拒绝」
-
-系统仅允许 **只读 SELECT**。若问题涉及写操作，请改问法或检查 LLM 是否生成了 DML/DDL。
-
-### MySQL 连接失败
-
-等待 MySQL 健康检查通过后再访问后端：
-
-```bash
-docker compose logs mysql
-```
-
-如果宿主机 3306 已有本地 MySQL，不需要关闭它；默认 Compose 使用 `13306:3306`。
-
-### 换用 Ollama 本地模型
-
-`.env` 示例：
-
-```env
-LLM_PROVIDER=ollama
-LLM_BASE_URL=http://host.docker.internal:11434/v1
-LLM_MODEL=llama3.1
-LLM_API_KEY=
-```
-
-## 下一步
-
-- 架构细节见 [architecture.md](architecture.md)
-- API 完整列表见 README 或 Swagger UI
-- 本地开发（非 Docker）见根目录 [README.md](../README.md)「方式二：本地开发」
+| 问题 | 处理 |
+| --- | --- |
+| 没有可选数据源 | 联系管理员授予 QUERY，或核验数据源只读账号 |
+| 返回“需要澄清” | 补充时间、指标、维度或明确过滤条件 |
+| 查询被阻断 | 查看 SQL/ACL/EXPLAIN 原因，不要绕过数据库只读权限 |
+| 导出按钮禁用 | 当前账号没有 EXPORT，或结果没有可导出的行 |
+| 真实模型未配置 | 设置 LLM base URL、model、key 和 API style 后重启 backend |
+| Mock 能答但真实模型失败 | Mock 仅覆盖确定性演示，不代表真实模型泛化 |
+| 页面显示请求 ID | 用该 ID 查询 backend 日志或管理员审计页面 |

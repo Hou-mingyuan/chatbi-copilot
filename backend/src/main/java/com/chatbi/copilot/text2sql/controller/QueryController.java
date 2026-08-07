@@ -33,6 +33,7 @@ public class QueryController {
     @Operation(summary = "Run an edited/known SQL (guarded, read-only)")
     @PostMapping("/run")
     public ApiResponse<QueryResult> run(@Valid @RequestBody RunSqlRequest req) {
-        return ApiResponse.ok(service.run(req.getDatasourceId(), req.getSql()));
+        return ApiResponse.ok(service.run(req.getDatasourceId(), req.getSql(), req.isConfirmRisk(),
+                null, req.getSessionId()));
     }
 }

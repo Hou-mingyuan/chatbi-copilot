@@ -16,6 +16,13 @@ public class DemoDataSourceProperties {
     private String host = "localhost";
     private int port = 3306;
     private String databaseName = "chatbi_demo";
-    private String username = "chatbi";
-    private String password = "chatbi123";
+    private String username = "chatbi_ro";
+    private String password = "ChatBI!Readonly123";
+    private boolean postgresEnabled;
+    private String postgresName = "Demo - Sales (PostgreSQL)";
+    private String postgresHost = "localhost";
+    private int postgresPort = 5432;
+    private String postgresDatabaseName = "chatbi_demo";
+    private String postgresUsername = "chatbi_ro";
+    private String postgresPassword = "ChatBI!Readonly123";
 }

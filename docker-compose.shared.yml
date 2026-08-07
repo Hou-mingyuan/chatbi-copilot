@@ -1,0 +1,19 @@
+# 共享基础设施模式：demo 数据源 MySQL/Postgres 统一复用 shared-infra 栈。
+# 启动：docker compose -f docker-compose.yml -f docker-compose.shared.yml up -d --build
+# 注意：首次使用前需向共享库导入 sample-data（见 shared-infra/README.md 迁移章节）。
+services:
+  mysql:
+    profiles: ["local-db-disabled"]
+  postgres:
+    profiles: ["local-db-disabled"]
+
+  backend:
+    depends_on: !override []
+    environment:
+      DEMO_DB_HOST: infra-mysql
+      DEMO_PG_HOST: infra-postgres
+    networks: [default, devnet]
+
+networks:
+  devnet:
+    external: true

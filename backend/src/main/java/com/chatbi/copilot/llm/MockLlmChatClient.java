@@ -24,7 +24,12 @@ public class MockLlmChatClient implements LlmClient {
     @Override
     public String chat(List<ChatMessage> messages) {
         String question = extractLastUserQuestion(messages);
-        return toJson(buildAnswer(question));
+        boolean postgres = messages != null && messages.stream()
+                .filter(message -> message != null && "system".equalsIgnoreCase(message.getRole()))
+                .map(ChatMessage::getContent)
+                .filter(java.util.Objects::nonNull)
+                .anyMatch(content -> content.contains("PostgreSQL"));
+        return toJson(buildAnswer(question, postgres));
     }
 
     static String extractLastUserQuestion(List<ChatMessage> messages) {
@@ -41,7 +46,29 @@ public class MockLlmChatClient implements LlmClient {
     }
 
     static Map<String, Object> buildAnswer(String question) {
+        return buildAnswer(question, false);
+    }
+
+    static Map<String, Object> buildAnswer(String question, boolean postgres) {
         String q = question == null ? "" : question.toLowerCase(Locale.ROOT);
+
+        if (containsAny(q, "删除", "修改", "写入", "密码", "口令", "绕过", "drop", "delete", "update", "password")) {
+            return clarification("Mock 仅支持已授权的只读问数，不能执行该请求。");
+        }
+
+        if (containsAny(q, "大区", "区域", "region")
+                && containsAny(q, "订单", "order")
+                && containsAny(q, "数量", "订单数", "count")) {
+            return answer("""
+                    SELECT c.region AS region, COUNT(*) AS paid_order_count
+                    FROM orders o
+                    JOIN customers c ON o.customer_id = c.id
+                    WHERE o.status = 'paid'
+                    GROUP BY c.region
+                    ORDER BY paid_order_count DESC
+                    LIMIT 500
+                    """, "Mock：各大区已支付订单数量。");
+        }
 
         if (containsAny(q, "华东", "华北", "华南", "华中", "西南") && !containsAny(q, "客户", "人数")) {
             String region = firstRegion(q);
@@ -74,15 +101,21 @@ public class MockLlmChatClient implements LlmClient {
                     "Mock：各产品类目销售额汇总，可用于占比图表。");
         }
         if (containsAny(q, "每月", "月度", "趋势") || (q.contains("2024") && containsAny(q, "销售", "金额"))) {
+            String month = postgres
+                    ? "TO_CHAR(o.order_date, 'YYYY-MM')"
+                    : "DATE_FORMAT(o.order_date, '%Y-%m')";
+            String year = postgres
+                    ? "EXTRACT(YEAR FROM o.order_date) = 2024"
+                    : "YEAR(o.order_date) = 2024";
             return answer(
                     """
-                    SELECT DATE_FORMAT(o.order_date, '%Y-%m') AS month, SUM(o.total_amount) AS total_sales
+                    SELECT %s AS month, SUM(o.total_amount) AS total_sales
                     FROM orders o
-                    WHERE o.status = 'paid' AND YEAR(o.order_date) = 2024
-                    GROUP BY DATE_FORMAT(o.order_date, '%Y-%m')
+                    WHERE o.status = 'paid' AND %s
+                    GROUP BY %s
                     ORDER BY month
                     LIMIT 500
-                    """,
+                    """.formatted(month, year, month),
                     "Mock：2024 年按月汇总已支付订单销售额。");
         }
         if (containsAny(q, "最高", "top", "前") && containsAny(q, "产品", "商品", "5")) {
@@ -99,7 +132,7 @@ public class MockLlmChatClient implements LlmClient {
                     """,
                     "Mock：销售额 Top 5 产品。");
         }
-        if (containsAny(q, "大区", "区域", "region") && containsAny(q, "客户", "数量", "人数")) {
+        if (containsAny(q, "大区", "区域", "region") && containsAny(q, "客户", "人数", "customer")) {
             return answer(
                     """
                     SELECT c.region AS region, COUNT(*) AS customer_count
@@ -111,14 +144,76 @@ public class MockLlmChatClient implements LlmClient {
                     "Mock：各大区客户数量。");
         }
 
-        return answer(
-                """
-                SELECT COUNT(*) AS paid_order_count
-                FROM orders o
-                WHERE o.status = 'paid'
-                LIMIT 500
-                """,
-                "Mock 默认：已支付订单总数。可尝试「各产品类目的销售额占比」等演示问句。");
+        if (containsAny(q, "大区", "区域", "region") && containsAny(q, "销售", "金额", "sales", "revenue")) {
+            return answer("""
+                    SELECT c.region AS region, SUM(o.total_amount) AS total_sales
+                    FROM orders o
+                    JOIN customers c ON o.customer_id = c.id
+                    WHERE o.status = 'paid'
+                    GROUP BY c.region
+                    ORDER BY total_sales DESC
+                    LIMIT 500
+                    """, "Mock：各大区已支付订单销售额。");
+        }
+
+        if (containsAny(q, "平均", "客单价", "average", "avg")) {
+            return answer("""
+                    SELECT AVG(o.total_amount) AS average_order_amount
+                    FROM orders o
+                    WHERE o.status = 'paid'
+                    LIMIT 500
+                    """, "Mock：已支付订单平均金额。");
+        }
+
+        if (containsAny(q, "状态", "status") && containsAny(q, "分布", "数量", "count")) {
+            return answer("""
+                    SELECT o.status AS order_status, COUNT(*) AS order_count
+                    FROM orders o
+                    GROUP BY o.status
+                    ORDER BY order_count DESC
+                    LIMIT 500
+                    """, "Mock：各状态订单数量。");
+        }
+
+        if (containsAny(q, "已支付", "paid")
+                && containsAny(q, "数量", "订单数", "count")
+                && containsAny(q, "金额", "销售额", "sales", "amount", "revenue")) {
+            return answer("""
+                    SELECT COUNT(*) AS paid_order_count, SUM(o.total_amount) AS paid_order_amount
+                    FROM orders o
+                    WHERE o.status = 'paid'
+                    LIMIT 500
+                    """, "Mock：已支付订单数量和金额。");
+        }
+
+        if (containsAny(q, "退款", "refunded") && containsAny(q, "多少", "数量", "count")) {
+            return answer("""
+                    SELECT COUNT(*) AS refunded_order_count
+                    FROM orders o
+                    WHERE o.status = 'refunded'
+                    LIMIT 500
+                    """, "Mock：已退款订单总数。");
+        }
+
+        if (containsAny(q, "销售总额", "销售额", "总金额", "total sales", "revenue")) {
+            return answer("""
+                    SELECT SUM(o.total_amount) AS total_sales
+                    FROM orders o
+                    WHERE o.status = 'paid'
+                    LIMIT 500
+                    """, "Mock：已支付订单销售总额。");
+        }
+
+        if (containsAny(q, "订单", "order") && containsAny(q, "多少", "数量", "count")) {
+            return answer("""
+                    SELECT COUNT(*) AS paid_order_count
+                    FROM orders o
+                    WHERE o.status = 'paid'
+                    LIMIT 500
+                    """, "Mock：已支付订单总数。");
+        }
+
+        return clarification("Mock 无法可靠映射该问题，请明确指标、维度和时间范围。");
     }
 
     private static Map<String, Object> answer(String sql, String explanation) {
@@ -126,6 +221,11 @@ public class MockLlmChatClient implements LlmClient {
                 "sql", sql.strip(),
                 "explanation", explanation,
                 "needClarification", false);
+    }
+
+    private static Map<String, Object> clarification(String message) {
+        return Map.of("sql", "", "explanation", "", "needClarification", true,
+                "clarification", message);
     }
 
     private static boolean containsAny(String text, String... needles) {

@@ -16,7 +16,11 @@ public class Favorite {
     @TableId(type = IdType.AUTO)
     private Long id;
 
+    private Long userId;
+
     private Long datasourceId;
+
+    private Long queryId;
 
     private String title;
 

@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.chatbi.copilot.common.ApiResponse;
 import com.chatbi.copilot.history.entity.QueryHistory;
 import com.chatbi.copilot.history.service.HistoryService;
+import com.chatbi.copilot.permission.Capability;
+import com.chatbi.copilot.text2sql.dto.QueryResult;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -30,6 +32,12 @@ public class HistoryController {
                                                  @RequestParam(defaultValue = "1") long page,
                                                  @RequestParam(defaultValue = "20") long size) {
         return ApiResponse.ok(service.page(datasourceId, page, size));
+    }
+
+    @Operation(summary = "Restore one authorized query result from its immutable snapshot")
+    @GetMapping("/{id}/result")
+    public ApiResponse<QueryResult> result(@PathVariable Long id) {
+        return ApiResponse.ok(service.result(id, Capability.QUERY));
     }
 
     @Operation(summary = "Delete one history entry")

@@ -1,5 +1,7 @@
 package com.chatbi.copilot.chart;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 
 import java.util.ArrayList;
@@ -15,12 +17,18 @@ public class ChartRecommendation {
     private String type = "table";
 
     /** Category/dimension field (x-axis). */
+    @JsonProperty("xField")
+    @JsonAlias("xfield")
     private String xField;
 
     /** Numeric measure field(s) (y-axis / values). */
+    @JsonProperty("yFields")
+    @JsonAlias("yfields")
     private List<String> yFields = new ArrayList<>();
 
     /** Optional series/group field for multi-series charts. */
+    @JsonProperty("seriesField")
+    @JsonAlias("seriesfield")
     private String seriesField;
 
     private String title;

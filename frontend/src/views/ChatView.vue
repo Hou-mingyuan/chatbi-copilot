@@ -1,424 +1,598 @@
 <script setup>
-import { ref, nextTick, computed, defineAsyncComponent } from 'vue'
+import { computed, defineAsyncComponent, nextTick, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { api } from '@/api'
+import { ArrowRight } from '@element-plus/icons-vue'
+import { api, errorMessage } from '@/api'
 import { useAppStore } from '@/stores/app'
-import { MOCK_DEMO_STEPS, sleep } from '@/utils/demoFlow'
 import { buildDrilldownQuestion } from '@/utils/askStream'
-import { typewriterText, ASK_LOADING_PHASES } from '@/utils/typewriter'
+import { jobStatusLabel, pollQueryJob } from '@/utils/queryJobs'
+
 const ResultPanel = defineAsyncComponent(() => import('@/components/ResultPanel.vue'))
 
 defineOptions({ name: 'ChatView' })
 
 const store = useAppStore()
-const { currentDatasourceId, llm } = storeToRefs(store)
 const router = useRouter()
-
+const { currentDatasourceId, currentDatasource, llm, online } = storeToRefs(store)
 const question = ref('')
 const messages = ref([])
-const turns = ref([])
-const sending = ref(false)
-const demoRunning = ref(false)
-const demoStep = ref(0)
+const sessionId = ref(null)
+const activeJobId = ref(null)
+const pollingController = ref(null)
 const listRef = ref(null)
 
-const isMockMode = computed(() => llm.value?.provider === 'mock')
-const busy = computed(() => sending.value || demoRunning.value)
-
-const examples = [
-  '各产品类目的销售额占比',
-  '2024年每月销售额趋势',
-  '销售额最高的5个产品',
-  '各大区的客户数量',
-  '各渠道的订单数量对比',
-  'VIP客户贡献了多少销售额'
-]
-
+const busy = computed(() => Boolean(activeJobId.value))
 const noDatasource = computed(() => !currentDatasourceId.value)
+const isMockMode = computed(() => llm.value?.provider === 'mock')
+const examples = [
+  '已支付订单的数量和销售额是多少？',
+  '按月查看已支付订单销售额趋势',
+  '销售额最高的 5 个产品是什么？',
+  '各产品类目的销售额占比',
+  '各大区的客户数量',
+  'VIP 客户贡献了多少销售额？'
+]
 
 function scrollBottom() {
   nextTick(() => {
-    const el = listRef.value
-    if (el) el.scrollTop = el.scrollHeight
+    if (listRef.value) listRef.value.scrollTop = listRef.value.scrollHeight
   })
 }
 
-function loadingPhaseText(phase) {
-  return ASK_LOADING_PHASES[Math.min(phase ?? 0, ASK_LOADING_PHASES.length - 1)]
+function updateAssistant(assistant, job) {
+  assistant.job = job
+  assistant.loading = !['SUCCEEDED', 'PREVIEWED', 'CLARIFICATION', 'NEEDS_CONFIRMATION', 'FAILED', 'CANCELLED', 'TIMED_OUT'].includes(job.status)
+  if (job.sessionId) sessionId.value = job.sessionId
+  scrollBottom()
 }
 
-async function send(text, { isRetry = false } = {}) {
-  const q = (typeof text === 'string' ? text : question.value).trim()
-  if (!q) return
-  if (noDatasource.value) {
-    ElMessage.warning('请先在右上角选择数据源')
+function applyTerminal(assistant, job) {
+  assistant.loading = false
+  const result = job.result
+  if (job.status === 'SUCCEEDED' || job.status === 'PREVIEWED') {
+    assistant.result = { ...result, question: assistant.question }
     return
   }
-  if (!isRetry) {
-    messages.value.push({ role: 'user', content: q })
-    messages.value.push({ role: 'assistant', loading: true, loadingPhase: 0 })
-  } else {
-    messages.value.push({ role: 'assistant', loading: true, loadingPhase: 0 })
+  if (job.status === 'CLARIFICATION') {
+    assistant.clarification = result?.clarification || '请补充时间范围、指标口径或分析维度。'
+    return
   }
-  const am = messages.value[messages.value.length - 1]
-  question.value = ''
-  sending.value = true
-  scrollBottom()
+  if (job.status === 'NEEDS_CONFIRMATION') {
+    assistant.confirmation = result
+    return
+  }
+  assistant.error = job.errorMessage || job.message || jobStatusLabel(job.status)
+  assistant.retryable = ['FAILED', 'CANCELLED', 'TIMED_OUT'].includes(job.status)
+}
 
-  const phaseTimer = setInterval(() => {
-    if (am.loading && am.loadingPhase < ASK_LOADING_PHASES.length - 1) {
-      am.loadingPhase += 1
-    }
-  }, 900)
-
+async function followJob(created, assistant) {
+  const controller = new AbortController()
+  pollingController.value = controller
+  activeJobId.value = created.id
+  updateAssistant(assistant, created)
   try {
-    const res = await api.ask({
-      datasourceId: currentDatasourceId.value,
-      question: q,
-      history: turns.value.slice(-5)
+    const terminal = await pollQueryJob(created.id, {
+      fetchJob: api.getQueryJob,
+      signal: controller.signal,
+      onUpdate: (job) => updateAssistant(assistant, job)
     })
-    clearInterval(phaseTimer)
-    am.loading = false
-
-    if (res.needClarification) {
-      am.clarification = res.clarification
-      am.explanation = res.explanation
-    } else {
-      am.streaming = true
-      am.streamText = ''
-      const explanation = res.explanation || '分析完成，正在加载图表与数据…'
-      await typewriterText(explanation, (t) => {
-        am.streamText = t
-      }, { charDelayMs: 14, chunkSize: 2 })
-      am.streaming = false
-      am.result = { ...res, question: q }
-      turns.value.push({ question: q, sql: res.sql })
+    applyTerminal(assistant, terminal)
+  } catch (error) {
+    if (!error.cancelled && error.name !== 'AbortError' && assistant.job?.status !== 'CANCELLED') {
+      assistant.loading = false
+      assistant.error = errorMessage(error)
+      assistant.retryable = true
     }
-  } catch (e) {
-    clearInterval(phaseTimer)
-    am.loading = false
-    am.error = e?.message || '查询失败'
-    am.retryQuestion = q
   } finally {
-    sending.value = false
+    if (activeJobId.value === created.id) activeJobId.value = null
+    if (pollingController.value === controller) pollingController.value = null
     scrollBottom()
   }
 }
 
-function retryFrom(am) {
-  const q = am.retryQuestion
-  if (!q || busy.value) return
-  const idx = messages.value.indexOf(am)
-  if (idx >= 0) messages.value.splice(idx, 1)
-  send(q, { isRetry: true })
+async function send(text) {
+  const value = (typeof text === 'string' ? text : question.value).trim()
+  if (!value || busy.value) return
+  if (!online.value) {
+    ElMessage.warning('网络已断开，请恢复连接后重试')
+    return
+  }
+  if (noDatasource.value) {
+    ElMessage.warning('请先选择可访问的数据源')
+    return
+  }
+
+  const assistant = {
+    role: 'assistant',
+    question: value,
+    loading: true,
+    job: { status: 'QUEUED', progress: 0, message: '正在提交查询' }
+  }
+  messages.value.push({ role: 'user', content: value }, assistant)
+  question.value = ''
+  scrollBottom()
+
+  try {
+    const created = await api.createAskJob({
+      datasourceId: currentDatasourceId.value,
+      question: value,
+      sessionId: sessionId.value
+    })
+    await followJob(created, assistant)
+  } catch (error) {
+    assistant.loading = false
+    assistant.error = errorMessage(error)
+    assistant.retryable = false
+    scrollBottom()
+  }
+}
+
+async function cancel(assistant) {
+  const id = assistant.job?.id
+  if (!id) return
+  try {
+    const job = await api.cancelQueryJob(id)
+    updateAssistant(assistant, job)
+    applyTerminal(assistant, job)
+    pollingController.value?.abort()
+  } catch (error) {
+    ElMessage.error(errorMessage(error))
+  }
+}
+
+async function retry(assistant, confirmRisk = false) {
+  const id = assistant.job?.id
+  if (!id || busy.value) return
+  assistant.error = null
+  assistant.confirmation = null
+  assistant.result = null
+  assistant.retryable = false
+  assistant.loading = true
+  try {
+    const created = await api.retryQueryJob(id, confirmRisk)
+    await followJob(created, assistant)
+  } catch (error) {
+    assistant.loading = false
+    assistant.error = errorMessage(error)
+    assistant.retryable = true
+  }
 }
 
 function onDrilldown(payload) {
-  const q = buildDrilldownQuestion(payload.label || payload.value, {
+  const value = payload.label ?? payload.value
+  send(buildDrilldownQuestion(value, {
     dimension: payload.dimension,
-    question: payload.question,
-  })
-  send(q)
+    question: payload.question
+  }))
 }
 
-function clearChat() {
-  if (demoRunning.value) return
-  messages.value = []
-  turns.value = []
-}
-
-async function runMockDemo() {
-  if (noDatasource.value) {
-    ElMessage.warning('请先在右上角选择数据源')
-    return
+async function newConversation() {
+  if (busy.value) {
+    const assistant = [...messages.value].reverse().find((item) => item.role === 'assistant' && item.loading)
+    if (assistant) await cancel(assistant)
   }
-  if (busy.value) return
-
-  demoRunning.value = true
-  demoStep.value = 0
+  pollingController.value?.abort()
   messages.value = []
-  turns.value = []
-
-  try {
-    for (let i = 0; i < MOCK_DEMO_STEPS.length; i++) {
-      demoStep.value = i + 1
-      await send(MOCK_DEMO_STEPS[i].question)
-      if (i < MOCK_DEMO_STEPS.length - 1) {
-        await sleep(600)
-      }
-    }
-    ElMessage.success('Mock 演示完成：类目占比 → 月度趋势 → Top5 → 华东追问')
-  } finally {
-    demoRunning.value = false
-    demoStep.value = 0
-  }
+  sessionId.value = null
+  question.value = ''
 }
+
+watch(currentDatasourceId, (next, previous) => {
+  if (previous != null && next !== previous) newConversation()
+})
 </script>
 
 <template>
-  <div class="chat">
-    <div class="chat-head">
+  <section class="chat-page">
+    <header class="chat-header">
       <div>
-        <h2 class="page-title">智能问数</h2>
-        <p class="page-subtitle">用自然语言提问，自动生成只读 SQL、执行并可视化</p>
+        <p class="eyebrow">自然语言问数</p>
+        <h1 class="page-title">{{ currentDatasource?.name || '智能问数' }}</h1>
+        <p class="page-subtitle">服务端校验权限与只读 SQL，图表、解读和导出均来自同一结果快照。</p>
       </div>
-      <el-button v-if="messages.length" text :icon="'Delete'" @click="clearChat">清空对话</el-button>
-    </div>
+      <div class="chat-actions">
+        <span v-if="sessionId" class="session-label" :title="sessionId">会话 {{ sessionId.slice(0, 8) }}</span>
+        <el-button :disabled="busy" @click="newConversation">新对话</el-button>
+      </div>
+    </header>
 
     <el-alert
       v-if="isMockMode"
-      type="success"
-      show-icon
+      class="mode-notice"
+      type="warning"
       :closable="false"
-      title="Mock 零密钥演示模式"
-      description="无需 API Key。点击「一键演示」自动跑通 4 步 NL2SQL 流程，或点击下方示例问题。"
-      style="margin-bottom: 12px"
+      show-icon
+      title="当前为 Mock 确定性回归模式"
+      description="它用于验证流程和安全边界，不代表真实模型的问数准确率。"
     />
     <el-alert
       v-else-if="!llm.configured"
-      type="warning"
-      show-icon
+      class="mode-notice"
+      type="error"
       :closable="false"
-      title="LLM 未配置"
-      description="请在后端 .env 中配置 LLM_API_KEY / LLM_BASE_URL / LLM_MODEL 后重启服务。"
-      style="margin-bottom: 12px"
+      show-icon
+      title="真实模型尚未配置"
+      description="管理员需配置兼容接口后重启服务；已有历史结果仍可查看。"
     />
 
-    <div ref="listRef" class="chat-list">
-      <div v-if="!messages.length" class="welcome">
-        <div class="welcome-emoji">📊</div>
-        <h3>欢迎使用 ChatBI Copilot</h3>
-        <p v-if="noDatasource" class="hint">
-          还没有数据源，
-          <el-link type="primary" @click="router.push('/datasources')">去添加一个</el-link>
-          （或用 docker-compose 一键启动演示库）
+    <div ref="listRef" class="chat-stream" aria-live="polite">
+      <div v-if="!messages.length" class="chat-empty">
+        <div class="empty-monogram">SQL</div>
+        <h2>{{ noDatasource ? '还没有可用数据源' : '从一个明确的业务问题开始' }}</h2>
+        <p v-if="noDatasource">
+          当前账户没有可查询的数据源。管理员可在数据源与权限页面完成配置。
         </p>
-        <p v-else class="hint">试试下面的示例问题，或使用 Mock 一键演示：</p>
-        <div v-if="!noDatasource && isMockMode" class="demo-actions">
-          <el-button
-            type="primary"
-            size="large"
-            round
-            :loading="demoRunning"
-            :icon="'VideoPlay'"
-            @click="runMockDemo"
-          >
-            {{ demoRunning ? `演示中 ${demoStep}/${MOCK_DEMO_STEPS.length}` : '一键演示 Mock 问数' }}
-          </el-button>
-        </div>
-        <div v-if="!noDatasource" class="examples">
-          <el-tag
-            v-for="ex in examples"
-            :key="ex"
-            class="example-chip"
-            effect="plain"
-            round
-            @click="send(ex)"
-          >
-            {{ ex }}
-          </el-tag>
-        </div>
+        <template v-else>
+          <p>写明指标、维度和时间范围；存在关键歧义时系统会先向你澄清。</p>
+          <div class="example-grid">
+            <button v-for="item in examples" :key="item" type="button" @click="send(item)">
+              <span>{{ item }}</span><el-icon><ArrowRight /></el-icon>
+            </button>
+          </div>
+        </template>
+        <el-button v-if="noDatasource && store.isAdmin" type="primary" @click="router.push('/datasources')">
+          配置数据源
+        </el-button>
       </div>
 
-      <template v-for="(m, i) in messages" :key="i">
-        <div v-if="m.role === 'user'" class="row user">
-          <div class="bubble user-bubble">{{ m.content }}</div>
-          <el-avatar class="avatar" :size="34">我</el-avatar>
-        </div>
+      <template v-for="(message, index) in messages" :key="index">
+        <article v-if="message.role === 'user'" class="message-row user-row">
+          <div class="message-label">你</div>
+          <div class="user-message">{{ message.content }}</div>
+        </article>
 
-        <div v-else class="row assistant">
-          <el-avatar class="avatar bot" :size="34">AI</el-avatar>
-          <div class="bubble bot-bubble">
-            <div v-if="m.loading" class="loading">
-              <el-icon class="is-loading"><Loading /></el-icon>
-              {{ loadingPhaseText(m.loadingPhase) }}
-            </div>
-            <div v-else-if="m.streaming" class="stream-text">
-              {{ m.streamText }}<span class="type-cursor">▍</span>
-            </div>
-            <div v-else-if="m.error" class="error-block">
-              <el-alert
-                type="error"
-                :closable="false"
-                show-icon
-                :title="m.error"
+        <article v-else class="message-row assistant-row">
+          <div class="message-label assistant-label">BI</div>
+          <div class="assistant-message">
+            <div v-if="message.loading" class="job-progress">
+              <div class="job-progress-head">
+                <div>
+                  <strong>{{ message.job?.message || jobStatusLabel(message.job?.status) }}</strong>
+                  <span>{{ jobStatusLabel(message.job?.status) }}</span>
+                </div>
+                <el-button size="small" plain @click="cancel(message)">取消</el-button>
+              </div>
+              <el-progress
+                :percentage="message.job?.progress || 0"
+                :show-text="false"
+                :stroke-width="5"
               />
-              <el-button size="small" type="primary" plain class="retry-btn" @click="retryFrom(m)">
+            </div>
+
+            <div v-else-if="message.error" class="terminal-state error-state">
+              <div>
+                <strong>{{ jobStatusLabel(message.job?.status) }}</strong>
+                <p>{{ message.error }}</p>
+              </div>
+              <el-button v-if="message.retryable" size="small" type="primary" plain @click="retry(message)">
                 重试
               </el-button>
             </div>
-            <el-alert
-              v-else-if="m.clarification"
-              type="warning"
-              :closable="false"
-              show-icon
-              title="需要澄清"
-              :description="m.clarification"
-            />
-            <Suspense v-else-if="m.result">
-              <ResultPanel :result="m.result" @drilldown="onDrilldown" />
-              <template #fallback>
-                <div class="loading">
-                  <el-icon class="is-loading"><Loading /></el-icon>
-                  加载结果面板…
-                </div>
-              </template>
+
+            <div v-else-if="message.clarification" class="clarification-state">
+              <p class="eyebrow">需要澄清</p>
+              <strong>{{ message.clarification }}</strong>
+              <span>直接在下方补充，答案会保留在当前服务端会话中。</span>
+            </div>
+
+            <div v-else-if="message.confirmation" class="risk-state">
+              <div>
+                <p class="eyebrow">执行计划确认</p>
+                <strong>该查询可能扫描较多数据，尚未执行。</strong>
+                <ul v-if="message.confirmation.risk?.reasons?.length">
+                  <li v-for="reason in message.confirmation.risk.reasons" :key="reason">{{ reason }}</li>
+                </ul>
+                <p v-if="message.confirmation.risk?.estimatedRows != null">
+                  预计扫描 {{ Number(message.confirmation.risk.estimatedRows).toLocaleString('zh-CN') }} 行
+                </p>
+              </div>
+              <div class="risk-actions">
+                <el-button size="small" type="primary" @click="retry(message, true)">确认并执行</el-button>
+                <el-button size="small" @click="message.error = '已放弃执行'; message.confirmation = null">放弃</el-button>
+              </div>
+            </div>
+
+            <Suspense v-else-if="message.result">
+              <ResultPanel
+                :result="message.result"
+                :can-export="Boolean(currentDatasource?.canExport)"
+                @drilldown="onDrilldown"
+              />
+              <template #fallback><div class="panel-loading">正在加载结果组件…</div></template>
             </Suspense>
           </div>
-        </div>
+        </article>
       </template>
     </div>
 
-    <div class="composer">
+    <form class="composer" @submit.prevent="send()">
       <el-input
         v-model="question"
         type="textarea"
-        :autosize="{ minRows: 1, maxRows: 4 }"
+        :autosize="{ minRows: 1, maxRows: 5 }"
         resize="none"
-        placeholder="例如：各产品类目的销售额占比（Enter 发送，Shift+Enter 换行）"
-        :disabled="noDatasource || demoRunning"
+        maxlength="1000"
+        placeholder="输入指标、维度和时间范围；Enter 发送，Shift + Enter 换行"
+        :disabled="noDatasource || busy || !online"
         @keydown.enter.exact.prevent="send()"
       />
       <el-button
+        native-type="submit"
         type="primary"
-        :loading="sending"
-        :disabled="noDatasource || !question.trim() || demoRunning"
-        :icon="'Promotion'"
-        @click="send()"
+        :disabled="noDatasource || busy || !question.trim() || !online"
       >
-        发送
+        {{ busy ? '查询中' : '发送' }}
       </el-button>
-    </div>
-  </div>
+    </form>
+  </section>
 </template>
 
 <style scoped>
-.chat {
-  display: flex;
-  flex-direction: column;
+.chat-page {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  width: min(100%, 1320px);
   height: 100%;
+  min-height: 520px;
+  margin: 0 auto;
 }
-.chat-head {
+.chat-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  gap: 16px;
 }
-.chat-list {
-  flex: 1;
-  overflow: auto;
-  background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.06);
-  padding: 18px;
-  margin-bottom: 12px;
-}
-.welcome {
-  text-align: center;
-  color: #6b7280;
-  padding: 48px 12px;
-}
-.welcome-emoji {
-  font-size: 44px;
-}
-.welcome h3 {
-  margin: 10px 0 6px;
-  color: #374151;
-}
-.hint {
-  font-size: 13px;
-}
-.demo-actions {
-  margin: 16px 0 4px;
-}
-.examples {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  justify-content: center;
-  margin-top: 14px;
-}
-.example-chip {
-  cursor: pointer;
-  padding: 8px 14px;
-  font-size: 13px;
-}
-.example-chip:hover {
-  color: var(--brand-1);
-  border-color: var(--brand-1);
-}
-.row {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 18px;
-  align-items: flex-start;
-}
-.row.user {
-  justify-content: flex-end;
-}
-.avatar {
-  flex-shrink: 0;
-  background: #e5e7eb;
-  color: #374151;
-  font-size: 13px;
-}
-.avatar.bot {
-  background: linear-gradient(135deg, var(--brand-1), var(--brand-2));
-  color: #fff;
-}
-.bubble {
-  max-width: 82%;
-}
-.user-bubble {
-  background: linear-gradient(135deg, var(--brand-1), var(--brand-2));
-  color: #fff;
-  padding: 10px 14px;
-  border-radius: 12px 12px 2px 12px;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.bot-bubble {
-  background: #f7f8fb;
-  border: 1px solid #eef0f4;
-  padding: 12px 14px;
-  border-radius: 12px 12px 12px 2px;
-  width: 100%;
-  max-width: 92%;
-}
-.loading {
-  color: #6b7280;
+.chat-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
-.stream-text {
-  color: #374151;
-  font-size: 14px;
+.session-label {
+  max-width: 150px;
+  overflow: hidden;
+  color: var(--ink-500);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mode-notice {
+  margin-bottom: 12px;
+}
+.chat-stream {
+  min-height: 0;
+  overflow: auto;
+  padding: 20px clamp(14px, 3vw, 42px);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.chat-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100%;
+  padding: 32px 12px;
+  text-align: center;
+}
+.empty-monogram {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid #beded8;
+  border-radius: 12px;
+  font: 750 12px/1 ui-monospace, monospace;
+  letter-spacing: 0.08em;
+}
+.chat-empty h2 {
+  margin: 18px 0 7px;
+  font-size: 20px;
+}
+.chat-empty > p {
+  max-width: 590px;
+  margin: 0 0 22px;
+  color: var(--ink-500);
+  font-size: 13px;
+  line-height: 1.65;
+}
+.example-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: min(100%, 700px);
+}
+.example-grid button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  padding: 10px 13px;
+  color: var(--ink-800);
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+}
+.example-grid button:hover {
+  color: var(--accent-strong);
+  border-color: #8fc5bd;
+}
+.message-row {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 11px;
+  margin-bottom: 22px;
+}
+.user-row {
+  grid-template-columns: minmax(0, 1fr) 32px;
+}
+.message-label {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  color: var(--ink-650);
+  background: #edf0ec;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 750;
+}
+.assistant-label {
+  color: #e9fffb;
+  background: var(--accent);
+}
+.user-message {
+  justify-self: end;
+  max-width: min(78%, 760px);
+  padding: 9px 13px;
+  color: #fff;
+  background: var(--ink-800);
+  border-radius: 9px 9px 2px 9px;
+  font-size: 13px;
   line-height: 1.6;
   white-space: pre-wrap;
 }
-.type-cursor {
-  color: var(--brand-1);
-  animation: blink 1s step-end infinite;
+.user-row .message-label {
+  grid-column: 2;
+  grid-row: 1;
 }
-@keyframes blink {
-  50% { opacity: 0; }
+.user-row .user-message {
+  grid-column: 1;
+  grid-row: 1;
 }
-.error-block {
+.assistant-message {
+  min-width: 0;
+}
+.job-progress,
+.terminal-state,
+.clarification-state,
+.risk-state {
+  max-width: 760px;
+  padding: 14px 16px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.job-progress-head,
+.terminal-state,
+.risk-state {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+.job-progress-head {
+  margin-bottom: 11px;
+}
+.job-progress-head div {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 3px;
 }
-.retry-btn {
-  align-self: flex-start;
+.job-progress-head strong,
+.terminal-state strong,
+.clarification-state strong,
+.risk-state strong {
+  color: var(--ink-800);
+  font-size: 13px;
+}
+.job-progress-head span,
+.terminal-state p,
+.clarification-state span,
+.risk-state p,
+.risk-state li {
+  margin: 0;
+  color: var(--ink-500);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.error-state {
+  border-color: #efcbc6;
+  background: #fff8f7;
+}
+.clarification-state {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  border-left: 3px solid #d29a36;
+}
+.risk-state {
+  border-left: 3px solid #c77d16;
+}
+.risk-state ul {
+  margin: 8px 0;
+  padding-left: 18px;
+}
+.risk-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+.panel-loading {
+  color: var(--ink-500);
+  font-size: 12px;
 }
 .composer {
   display: flex;
-  gap: 10px;
   align-items: flex-end;
+  gap: 9px;
+  padding-top: 12px;
 }
 .composer .el-textarea {
   flex: 1;
+}
+.composer :deep(.el-textarea__inner) {
+  min-height: 42px !important;
+  padding: 10px 12px;
+  border-radius: 8px;
+}
+.composer .el-button {
+  min-width: 78px;
+  height: 42px;
+}
+@media (max-width: 640px) {
+  .chat-page {
+    min-height: 0;
+  }
+  .chat-header .page-subtitle,
+  .session-label {
+    display: none;
+  }
+  .chat-stream {
+    padding: 14px 10px;
+  }
+  .example-grid {
+    grid-template-columns: 1fr;
+  }
+  .message-row {
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 8px;
+  }
+  .user-row {
+    grid-template-columns: minmax(0, 1fr) 28px;
+  }
+  .message-label {
+    width: 28px;
+    height: 28px;
+  }
+  .user-message {
+    max-width: 88%;
+  }
+  .risk-state,
+  .terminal-state {
+    flex-direction: column;
+  }
+  .composer .el-button {
+    min-width: 62px;
+  }
 }
 </style>
