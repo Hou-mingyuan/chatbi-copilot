@@ -120,7 +120,9 @@ DEMO_PG_ENABLED=false
 LLM_API_KEY=<secret-from-secret-manager>
 ```
 
-生产启动闸门会拒绝默认加密密钥、演示认证、非 Secure Cookie 或通配 CORS。
+生产启动闸门（`ProductionGuard`）在 `CHATBI_PRODUCTION_MODE=true` 时拒绝：演示认证、
+默认或过短的加密密钥、非 Secure Cookie、通配/空 CORS、mock 模型、缺失的 LLM API Key
+以及自动注册的演示数据源。
 
 还应：
 
