@@ -37,6 +37,9 @@ public class LlmProperties {
 
     private Integer timeoutSeconds = 60;
 
+    /** Embedding endpoint settings for semantic schema recall. Off by default: lexical recall works without it. */
+    private Embeddings embeddings = new Embeddings();
+
     public boolean isConfigured() {
         if (provider != null && "mock".equalsIgnoreCase(provider.trim())) {
             return true;
@@ -53,5 +56,14 @@ public class LlmProperties {
                 || normalizedBaseUrl.contains("localhost")
                 || normalizedBaseUrl.contains("127.0.0.1")
                 || normalizedBaseUrl.contains("host.docker.internal");
+    }
+
+    @Data
+    public static class Embeddings {
+        /** Master switch; when off (or on any client failure) schema recall falls back to lexical scoring. */
+        private boolean enabled = false;
+        /** OpenAI-compatible embeddings model, e.g. text-embedding-3-small. */
+        private String model = "text-embedding-3-small";
+        private int timeoutSeconds = 20;
     }
 }

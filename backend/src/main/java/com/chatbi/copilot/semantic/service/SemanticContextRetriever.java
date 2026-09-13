@@ -24,15 +24,22 @@ public class SemanticContextRetriever {
     private static final Pattern TERM_SPLIT = Pattern.compile("[^\\p{L}\\p{N}_]+", Pattern.UNICODE_CHARACTER_CLASS);
 
     private final SemanticService semanticService;
+    private final EmbeddingSchemaIndex embeddingIndex;
 
-    public SemanticContextRetriever(SemanticService semanticService) {
+    /** Lexical score weight when embedding recall is active; the rest goes to cosine similarity. */
+    private static final double LEXICAL_WEIGHT = 0.4;
+
+    public SemanticContextRetriever(SemanticService semanticService, EmbeddingSchemaIndex embeddingIndex) {
         this.semanticService = semanticService;
+        this.embeddingIndex = embeddingIndex;
     }
 
     public SemanticContext retrieve(SchemaInfo authorizedSchema, String question) {
         String normalizedQuestion = normalize(question);
         List<SemanticModel> definitions = semanticService.listActiveUnchecked(authorizedSchema.getDatasourceId());
-        Map<String, Integer> scores = scoreTables(authorizedSchema, definitions, normalizedQuestion);
+        Map<String, Integer> lexical = scoreTables(authorizedSchema, definitions, normalizedQuestion);
+        Map<String, Double> similarities = embeddingIndex.tableSimilarities(authorizedSchema, question);
+        Map<String, Integer> scores = blendScores(lexical, similarities);
         LinkedHashSet<String> selected = scores.entrySet().stream()
                 .filter(entry -> entry.getValue() > 0)
                 .sorted(Map.Entry.<String, Integer>comparingByValue(Comparator.reverseOrder())
@@ -80,6 +87,33 @@ public class SemanticContextRetriever {
                 || selectedColumnCount < totalColumns || selectedDefinitions.size() < definitions.size();
         return new SemanticContext(compact, selectedDefinitions, authorizedSchema.getTables().size(),
                 compact.getTables().size(), totalColumns, selectedColumnCount, truncated);
+    }
+
+    /**
+     * Blends lexical keyword scores with embedding cosine similarities. When embeddings are
+     * unavailable (disabled, client failure, or zero similarity mass) the lexical score is used
+     * unchanged, so behaviour never degrades below the original recall.
+     */
+    private Map<String, Integer> blendScores(Map<String, Integer> lexical, Map<String, Double> similarities) {
+        if (similarities.isEmpty()) {
+            return lexical;
+        }
+        Map<String, Integer> blended = new HashMap<>(lexical);
+        double maxSimilarity = similarities.values().stream().mapToDouble(Double::doubleValue).max().orElse(0);
+        if (maxSimilarity <= 0) {
+            return blended;
+        }
+        for (Map.Entry<String, Double> entry : similarities.entrySet()) {
+            if (entry.getValue() == null || entry.getValue() <= 0) {
+                continue;
+            }
+            double normalized = entry.getValue() / maxSimilarity;
+            int lexicalScore = lexical.getOrDefault(entry.getKey(), 0);
+            int lexicalSignal = (int) Math.round(LEXICAL_WEIGHT * lexicalScore);
+            int embeddingSignal = (int) Math.round((1 - LEXICAL_WEIGHT) * 20 * normalized);
+            blended.merge(entry.getKey(), lexicalSignal + embeddingSignal, Integer::sum);
+        }
+        return blended;
     }
 
     private Map<String, Integer> scoreTables(SchemaInfo schema, List<SemanticModel> definitions, String question) {

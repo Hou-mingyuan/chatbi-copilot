@@ -64,6 +64,12 @@ chatbi:
     max-tokens: ${LLM_MAX_TOKENS:2048}
     reasoning-effort: ${LLM_REASONING_EFFORT:none}
     timeout-seconds: ${LLM_TIMEOUT_SECONDS:60}
+    embeddings:
+      # 语义召回增强：开启后表结构按 embedding 余弦相似度与词法得分混合排序；
+      # 关闭或调用失败时自动回退为纯词法召回。
+      enabled: ${LLM_EMBEDDINGS_ENABLED:false}
+      model: ${LLM_EMBEDDINGS_MODEL:text-embedding-3-small}
+      timeout-seconds: ${LLM_EMBEDDINGS_TIMEOUT_SECONDS:20}
   sql-guard:
     # Only read-only single SELECT statements are allowed; a LIMIT is force-injected when missing.
     default-limit: 500
