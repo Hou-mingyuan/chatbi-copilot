@@ -1,0 +1,82 @@
+name: NL2SQL evaluation
+
+# 定时真实模型评测：34+ 用例固定集走完整生成→护栏→执行→结果等价链路，
+# 按数据集内置阈值（modelSuccessRate/clarificationRate/safetyInterceptionRate）判 gate。
+# 需要仓库 Secrets：CHATBI_LLM_API_KEY、CHATBI_LLM_BASE_URL、CHATBI_LLM_MODEL。
+# 未配置密钥时手动触发会明确跳过，不做半真半假的评测。
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * 1" # 每周一 02:00 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate:
+    name: Fixed-dataset real-model evaluation
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CHATBI_LLM_API_KEY: ${{ secrets.CHATBI_LLM_API_KEY }}
+      CHATBI_LLM_BASE_URL: ${{ secrets.CHATBI_LLM_BASE_URL }}
+      CHATBI_LLM_MODEL: ${{ secrets.CHATBI_LLM_MODEL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Require evaluation secrets
+        run: |
+          if [ -z "$CHATBI_LLM_API_KEY" ] || [ -z "$CHATBI_LLM_BASE_URL" ] || [ -z "$CHATBI_LLM_MODEL" ]; then
+            echo "::notice::CHATBI_LLM_API_KEY / CHATBI_LLM_BASE_URL / CHATBI_LLM_MODEL secrets are not configured; real-model evaluation skipped."
+            exit 0
+          fi
+
+      - name: Prepare env
+        if: env.CHATBI_LLM_API_KEY != ''
+        run: |
+          cp .env.example .env
+          cat >> .env <<EOF
+          LLM_PROVIDER=openai
+          LLM_BASE_URL=$CHATBI_LLM_BASE_URL
+          LLM_MODEL=$CHATBI_LLM_MODEL
+          LLM_API_KEY=$CHATBI_LLM_API_KEY
+          EOF
+
+      - name: Build and start stack
+        if: env.CHATBI_LLM_API_KEY != ''
+        run: docker compose up -d --build --wait
+
+      - name: Wait for backend health
+        if: env.CHATBI_LLM_API_KEY != ''
+        run: |
+          for i in $(seq 1 36); do
+            if curl -sf http://localhost:19030/api/health/ready; then
+              exit 0
+            fi
+            sleep 5
+          done
+          docker compose logs backend
+          exit 1
+
+      - name: Run fixed-dataset evaluation against the real model
+        if: env.CHATBI_LLM_API_KEY != ''
+        run: node scripts/evaluate-nl2sql.mjs --base-url http://127.0.0.1:19030/api --output reports/nl2sql-eval-ci.json
+
+      - name: Upload evaluation report
+        if: always() && env.CHATBI_LLM_API_KEY != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: nl2sql-eval-report
+          path: reports/nl2sql-eval-ci.json
+          if-no-files-found: ignore
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
